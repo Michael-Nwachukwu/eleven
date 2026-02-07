@@ -1,0 +1,219 @@
+import { createClient } from 'redis'
+import crypto from 'crypto'
+
+// Types
+export interface AgentWallet {
+    id: string
+    userId: string
+    adminAddress: string
+    agentAddress: string
+    encryptedPrivateKey: string
+    createdAt: string
+    updatedAt: string
+    isActive: boolean
+}
+
+export interface Payment {
+    id: string
+    agentWalletId: string
+    transactionHash?: string
+    paymentType: 'crypto' | 'fiat'
+    amount: string
+    token: string
+    status: 'pending' | 'completed' | 'failed'
+    metadata?: Record<string, any>
+    createdAt: string
+}
+
+// Redis client singleton
+let redisClient: ReturnType<typeof createClient> | null = null
+
+async function getRedisClient() {
+    if (!redisClient) {
+        redisClient = createClient({
+            url: process.env.REDIS_URL
+        })
+
+        redisClient.on('error', (err) => console.error('Redis Client Error', err))
+
+        await redisClient.connect()
+    }
+
+    return redisClient
+}
+
+// Encryption utilities
+const ENCRYPTION_KEY = process.env.ENCRYPTION_SECRET || 'default-secret-change-in-production'
+
+export function encryptPrivateKey(privateKey: string): string {
+    const algorithm = 'aes-256-cbc'
+    const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32)
+    const iv = crypto.randomBytes(16)
+
+    const cipher = crypto.createCipheriv(algorithm, key, iv)
+    let encrypted = cipher.update(privateKey, 'utf8', 'hex')
+    encrypted += cipher.final('hex')
+
+    return JSON.stringify({
+        encrypted,
+        iv: iv.toString('hex')
+    })
+}
+
+export function decryptPrivateKey(encryptedData: string): string {
+    const { encrypted, iv } = JSON.parse(encryptedData)
+    const algorithm = 'aes-256-cbc'
+    const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32)
+
+    const decipher = crypto.createDecipheriv(
+        algorithm,
+        key,
+        Buffer.from(iv, 'hex')
+    )
+
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8')
+    decrypted += decipher.final('utf8')
+
+    return decrypted
+}
+
+// Agent Wallet Database Operations
+export async function createAgentWallet(
+    userId: string,
+    adminAddress: string,
+    agentAddress: string,
+    privateKey: string
+): Promise<AgentWallet> {
+    const redis = await getRedisClient()
+    const id = crypto.randomUUID()
+    const now = new Date().toISOString()
+
+    const agentWallet: AgentWallet = {
+        id,
+        userId,
+        adminAddress,
+        agentAddress,
+        encryptedPrivateKey: encryptPrivateKey(privateKey),
+        createdAt: now,
+        updatedAt: now,
+        isActive: true
+    }
+
+    // Store in Redis with multiple keys for different access patterns
+    await redis.set(`agent:${id}`, JSON.stringify(agentWallet))
+    await redis.set(`agent:user:${userId}`, id) // Index by userId
+    await redis.set(`agent:address:${agentAddress}`, id) // Index by address
+
+    return agentWallet
+}
+
+export async function getAgentByUserId(userId: string): Promise<AgentWallet | null> {
+    const redis = await getRedisClient()
+    const agentId = await redis.get(`agent:user:${userId}`)
+    if (!agentId) return null
+
+    const agentData = await redis.get(`agent:${agentId}`)
+    if (!agentData) return null
+
+    return JSON.parse(agentData)
+}
+
+export async function getAgentById(id: string): Promise<AgentWallet | null> {
+    const redis = await getRedisClient()
+    const agentData = await redis.get(`agent:${id}`)
+    if (!agentData) return null
+
+    return JSON.parse(agentData)
+}
+
+export async function getAgentByAddress(address: string): Promise<AgentWallet | null> {
+    const redis = await getRedisClient()
+    const agentId = await redis.get(`agent:address:${address}`)
+    if (!agentId) return null
+
+    const agentData = await redis.get(`agent:${agentId}`)
+    if (!agentData) return null
+
+    return JSON.parse(agentData)
+}
+
+export async function getDecryptedPrivateKey(userId: string): Promise<string | null> {
+    const agent = await getAgentByUserId(userId)
+    if (!agent) return null
+
+    return decryptPrivateKey(agent.encryptedPrivateKey)
+}
+
+// Payment History Operations
+export async function createPayment(
+    agentWalletId: string,
+    paymentType: 'crypto' | 'fiat',
+    amount: string,
+    token: string,
+    metadata?: Record<string, any>
+): Promise<Payment> {
+    const redis = await getRedisClient()
+    const id = crypto.randomUUID()
+    const now = new Date().toISOString()
+
+    const payment: Payment = {
+        id,
+        agentWalletId,
+        paymentType,
+        amount,
+        token,
+        status: 'pending',
+        metadata,
+        createdAt: now
+    }
+
+    // Store payment
+    await redis.set(`payment:${id}`, JSON.stringify(payment))
+
+    // Add to agent's payment list
+    await redis.lPush(`payments:agent:${agentWalletId}`, id)
+
+    return payment
+}
+
+export async function updatePaymentStatus(
+    paymentId: string,
+    status: 'completed' | 'failed',
+    transactionHash?: string
+): Promise<Payment | null> {
+    const redis = await getRedisClient()
+    const paymentData = await redis.get(`payment:${paymentId}`)
+    if (!paymentData) return null
+
+    const payment: Payment = JSON.parse(paymentData)
+    payment.status = status
+    if (transactionHash) {
+        payment.transactionHash = transactionHash
+    }
+
+    await redis.set(`payment:${paymentId}`, JSON.stringify(payment))
+    return payment
+}
+
+export async function getPaymentsByAgent(agentWalletId: string, limit = 50): Promise<Payment[]> {
+    const redis = await getRedisClient()
+    const paymentIds = await redis.lRange(`payments:agent:${agentWalletId}`, 0, limit - 1)
+    if (!paymentIds || paymentIds.length === 0) return []
+
+    const payments = await Promise.all(
+        paymentIds.map(async (id) => {
+            const data = await redis.get(`payment:${id}`)
+            return data ? JSON.parse(data) : null
+        })
+    )
+
+    return payments.filter((p): p is Payment => p !== null)
+}
+
+export async function getPaymentById(paymentId: string): Promise<Payment | null> {
+    const redis = await getRedisClient()
+    const paymentData = await redis.get(`payment:${paymentId}`)
+    if (!paymentData) return null
+
+    return JSON.parse(paymentData)
+}

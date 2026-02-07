@@ -135,7 +135,7 @@ export async function executeCryptoPayment(
     const usdcContract = getContract({
       client: thirdwebClient,
       address: paymentRequest.asset,
-      chain: arbitrum, // Use arbitrum chain from thirdweb/chains
+      chain: arbitrum, // Use Arbitrum One mainnet
     })
 
     onProgress?.({

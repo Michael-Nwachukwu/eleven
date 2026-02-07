@@ -82,7 +82,7 @@ const USDC_ARBITRUM = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 
 // Chain IDs
 const CHAIN_IDS: Record<string, number> = {
-  "arbitrum": 42161,
+  "arbitrum": 42161, // Arbitrum One
   "arbitrum-one": 42161,
 };
 
@@ -182,7 +182,7 @@ class AeonX402Client {
     const validAfter = now;
     const validBefore = now + (paymentInfo.maxTimeoutSeconds || 120);
     const nonce = generateNonce();
-    const chainId = CHAIN_IDS[paymentInfo.network] || 42161; // Default to Arbitrum
+    const chainId = CHAIN_IDS[paymentInfo.network] || 42161; // Default to Arbitrum One
 
     // Create the authorization object
     const authorization: AeonAuthorization = {

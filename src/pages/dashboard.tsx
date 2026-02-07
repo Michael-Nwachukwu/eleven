@@ -6,30 +6,112 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { AgentCard } from "@/components/ui/agent-card"
 import { EmptyState } from "@/components/ui/empty-state"
-import { Bot, ArrowUpRight, QrCode, Wallet, TrendingUp, Settings } from "lucide-react"
+import { Bot, ArrowUpRight, QrCode, Wallet, TrendingUp, Settings, Copy, ExternalLink, Loader2 } from "lucide-react"
 import { Link, useNavigate, Navigate } from "react-router-dom"
 import { useState, useEffect } from "react"
+import { useAgentWallet } from "@/hooks/useAgentWallet"
+import { toast } from "sonner"
+import { readContract } from "thirdweb"
+import { thirdwebClient } from "@/services/thirdweb-agent-service"
+import { arbitrum } from "thirdweb/chains"
+
+// USDC contract on Arbitrum
+const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
 
 export default function Dashboard() {
   const { user, authenticated, ready } = usePrivy()
   const navigate = useNavigate()
+  const { agent, loading: agentLoading } = useAgentWallet()
 
-  // Mock state for agent existence
-  // In a real app, this would come from an API/smart contract
-  const [hasAgent, setHasAgent] = useState<boolean>(false)
+  const [usdcBalance, setUsdcBalance] = useState<string>("0")
+  const [ethBalance, setEthBalance] = useState<string>("0")
+  const [loadingBalances, setLoadingBalances] = useState(false)
 
-  // Check local storage to simulate persistence across the demo
+  // Fetch balances when agent is loaded
   useEffect(() => {
-    const agentCreated = localStorage.getItem("agent-created") === "true"
-    setHasAgent(agentCreated)
-  }, [])
+    async function fetchBalances() {
+      if (!agent?.agentAddress) return
+
+      setLoadingBalances(true)
+      try {
+        // Fetch USDC balance
+        const usdcBalanceRaw = await readContract({
+          contract: {
+            client: thirdwebClient,
+            chain: arbitrum,
+            address: USDC_ADDRESS,
+          },
+          method: "function balanceOf(address) view returns (uint256)",
+          params: [agent.agentAddress as `0x${string}`],
+        })
+
+        // USDC has 6 decimals
+        const usdcFormatted = (Number(usdcBalanceRaw) / 1e6).toFixed(2)
+        setUsdcBalance(usdcFormatted)
+
+        // Fetch ETH balance
+        const response = await fetch(
+          `https://arb1.arbitrum.io/rpc`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'eth_getBalance',
+              params: [agent.agentAddress, 'latest'],
+              id: 1,
+            }),
+          }
+        )
+        const data = await response.json()
+        const ethWei = BigInt(data.result || '0')
+        const ethFormatted = (Number(ethWei) / 1e18).toFixed(4)
+        setEthBalance(ethFormatted)
+      } catch (error) {
+        console.error('Error fetching balances:', error)
+      } finally {
+        setLoadingBalances(false)
+      }
+    }
+
+    fetchBalances()
+  }, [agent?.agentAddress])
+
+  // Copy address to clipboard
+  const copyAddress = () => {
+    if (agent?.agentAddress) {
+      navigator.clipboard.writeText(agent.agentAddress)
+      toast.success("Address copied to clipboard!")
+    }
+  }
+
+  // Open in block explorer
+  const openInExplorer = () => {
+    if (agent?.agentAddress) {
+      window.open(`https://arbiscan.io/address/${agent.agentAddress}`, '_blank')
+    }
+  }
 
   // Added authentication check to redirect if not logged in
   if (ready && !authenticated) {
     return <Navigate to="/" />
   }
 
-  if (!hasAgent) {
+  // Loading state
+  if (agentLoading) {
+    return (
+      <DashboardLayout>
+        <div className="max-w-4xl mx-auto">
+          <div className="flex items-center justify-center h-64">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
+  // No agent state
+  if (!agent) {
     return (
       <DashboardLayout>
         <div className="max-w-4xl mx-auto">
@@ -50,24 +132,82 @@ export default function Dashboard() {
     )
   }
 
+  // Format address for display
+  const shortAddress = `${agent.agentAddress.slice(0, 6)}...${agent.agentAddress.slice(-4)}`
+
   return (
     <DashboardLayout>
       <div className="max-w-4xl mx-auto space-y-8">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-            <p className="text-muted-foreground mt-2">Overview of your autonomous agent</p>
+            <p className="text-muted-foreground mt-2">Overview of your payment agent</p>
           </div>
           <Button asChild>
-            <Link to="/payments">
-              Send Payment <ArrowUpRight className="ml-2 h-4 w-4" />
+            <Link to="/qr-generator">
+              Generate QR Code <QrCode className="ml-2 h-4 w-4" />
             </Link>
           </Button>
         </div>
 
         <div className="grid gap-6 md:grid-cols-2">
+          {/* Agent Wallet Card */}
           <div className="md:col-span-2">
-            <AgentCard name="Prime Alpha Agent" address="0x71C...9A23" balance="4.2" status="active" />
+            <Card>
+              <CardHeader>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Wallet className="h-5 w-5" />
+                      Agent Wallet
+                    </CardTitle>
+                    <CardDescription className="mt-2">
+                      Smart account on Arbitrum
+                    </CardDescription>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="icon" onClick={copyAddress}>
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                    <Button variant="outline" size="icon" onClick={openInExplorer}>
+                      <ExternalLink className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Address */}
+                <div className="bg-muted/50 rounded-lg p-4">
+                  <div className="text-xs text-muted-foreground mb-1">Wallet Address</div>
+                  <div className="font-mono text-sm break-all">{agent.agentAddress}</div>
+                </div>
+
+                {/* Balances */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-muted/50 rounded-lg p-4">
+                    <div className="text-xs text-muted-foreground mb-1">USDC Balance</div>
+                    {loadingBalances ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <div className="text-2xl font-bold">{usdcBalance} USDC</div>
+                    )}
+                  </div>
+                  <div className="bg-muted/50 rounded-lg p-4">
+                    <div className="text-xs text-muted-foreground mb-1">ETH Balance</div>
+                    {loadingBalances ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <div className="text-2xl font-bold">{ethBalance} ETH</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Created Date */}
+                <div className="text-xs text-muted-foreground">
+                  Created: {new Date(agent.createdAt).toLocaleDateString()}
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
           {/* Quick Actions */}
@@ -88,73 +228,35 @@ export default function Dashboard() {
                 </Link>
               </Button>
               <Button variant="outline" className="w-full justify-start bg-transparent" asChild>
-                <Link to="/strategies">
-                  <TrendingUp className="mr-2 h-4 w-4" /> Manage Strategies
-                </Link>
-              </Button>
-              <Button variant="outline" className="w-full justify-start bg-transparent" asChild>
-                <Link to="/agent-settings">
-                  <Settings className="mr-2 h-4 w-4" /> Agent Settings
+                <Link to="/payments">
+                  <ArrowUpRight className="mr-2 h-4 w-4" /> Send Payment
                 </Link>
               </Button>
             </CardContent>
           </Card>
 
-          {/* Recent Activity Placeholder */}
+          {/* Agent Info */}
           <Card>
             <CardHeader>
-              <CardTitle>Recent Activity</CardTitle>
-              <CardDescription>Latest transactions and events</CardDescription>
+              <CardTitle>Agent Information</CardTitle>
+              <CardDescription>Details about your payment agent</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b pb-4 last:border-0 last:pb-0">
-                  <div className="flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-full bg-green-500/10 flex items-center justify-center">
-                      <ArrowUpRight className="h-4 w-4 text-green-500" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">Payment Sent</p>
-                      <p className="text-xs text-muted-foreground">To 0xAB...45cd</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold">-0.05 ETH</p>
-                    <p className="text-xs text-muted-foreground">2 mins ago</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between border-b pb-4 last:border-0 last:pb-0">
-                  <div className="flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-full bg-blue-500/10 flex items-center justify-center">
-                      <Wallet className="h-4 w-4 text-blue-500" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">Funds Received</p>
-                      <p className="text-xs text-muted-foreground">From Coinbase</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold">+1.5 ETH</p>
-                    <p className="text-xs text-muted-foreground">1 hour ago</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between border-b pb-4 last:border-0 last:pb-0">
-                  <div className="flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-full bg-purple-500/10 flex items-center justify-center">
-                      <TrendingUp className="h-4 w-4 text-purple-500" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">Strategy Rebalanced</p>
-                      <p className="text-xs text-muted-foreground">Yield Optimizer</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold">Auto</p>
-                    <p className="text-xs text-muted-foreground">5 hours ago</p>
-                  </div>
-                </div>
+            <CardContent className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted-foreground">Network</span>
+                <span className="text-sm font-medium">Arbitrum One</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted-foreground">Wallet Type</span>
+                <span className="text-sm font-medium">Smart Account</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted-foreground">Status</span>
+                <span className="text-sm font-medium text-green-500">Active</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted-foreground">Payment Modes</span>
+                <span className="text-sm font-medium">Crypto + Fiat</span>
               </div>
             </CardContent>
           </Card>
