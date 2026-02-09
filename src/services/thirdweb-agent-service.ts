@@ -75,30 +75,51 @@ export async function createSessionKey(
 
 /**
  * Get existing agent wallet from stored private key
+ * Returns the EOA account directly since that's where funds are stored
  */
 export async function getAgentWallet(privateKey: string) {
     // Recreate admin account from stored private key
     const adminAccount = privateKeyAccount({
         client: thirdwebClient,
-        privateKey,
+        privateKey: privateKey as `0x${string}`,
     })
 
-    // Reconnect to smart account
-    const agentWallet = smartWallet({
+    // Return EOA directly - funds are on the EOA address
+    // The "agentWallet" is the admin account that can send transactions
+    return {
+        adminAddress: adminAccount.address,
+        agentAddress: adminAccount.address, // Same as admin since funds are here
+        agentWallet: {
+            getAccount: () => adminAccount,
+        },
+    }
+}
+
+/**
+ * Get smart wallet (for gasless transactions in future)
+ * Note: This creates a different address than the EOA
+ */
+export async function getSmartWallet(privateKey: string) {
+    const adminAccount = privateKeyAccount({
+        client: thirdwebClient,
+        privateKey: privateKey as `0x${string}`,
+    })
+
+    const wallet = smartWallet({
         chain: arbitrum,
         gasless: true,
     })
 
-    await agentWallet.connect({
+    await wallet.connect({
         client: thirdwebClient,
         personalAccount: adminAccount,
     })
 
-    const agentAccount = agentWallet.getAccount()
+    const smartAccount = wallet.getAccount()
 
     return {
         adminAddress: adminAccount.address,
-        agentAddress: agentAccount?.address || '',
-        agentWallet,
+        smartWalletAddress: smartAccount?.address || '',
+        agentWallet: wallet,
     }
 }
