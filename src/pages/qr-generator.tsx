@@ -50,6 +50,55 @@ export default function QrGenerator() {
   // Get bank list for dropdown
   const banksList = getNigerianBanksList()
 
+  // TEST FUNCTION: Generate a valid test payment request using Aeon's example VietQR
+  const handleTestVietQR = () => {
+    // Example VietQR from Aeon docs
+    const testVietQR = "00020101021138560010A0000007270126000697041501121170028740400208QRIBFTTA53037045802VN63048A1C"
+
+    // Create payment request with this QR code
+    const paymentRequest: X402PaymentRequest = {
+      maxAmountRequired: "10000", // Just a display placeholder
+      resource: 'https://ai-api-sbx.aeon.xyz/open/ai/402/payment', // Sandbox URL
+      payTo: '0x0000000000000000000000000000000000000000' as `0x${string}`,
+      asset: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' as `0x${string}`, // USDC on Arbitrum
+      network: 'arbitrum',
+      description: "Test Payment (VietQR)",
+      metadata: {
+        itemName: "Test Payment (VietQR)",
+        timestamp: Date.now(),
+        mode: 'fiat',
+        provider: 'aeon',
+        appId: 'TEST000001',
+        qrCode: testVietQR, // The critical part - real VietQR code
+        currency: 'VND',
+        originalAmount: "10000",
+        bankName: "Test Bank (Vietnam)",
+        accountNumber: "1234567890",
+        accountName: "TEST USER"
+      }
+    }
+
+    console.log('=== TEST VietQR Payment Request ===')
+    console.log('Payment Request:', paymentRequest)
+
+    const uri = encodeX402Payment(paymentRequest)
+    setX402Uri(uri)
+
+    QRCode.toDataURL(uri, {
+      errorCorrectionLevel: 'H',
+      type: 'image/png',
+      width: 400,
+      margin: 2,
+    }).then(url => {
+      setQrCodeDataUrl(url)
+      setGenerated(true)
+      setPaymentMode('fiat')
+      setAmount("10000")
+      setFiatCurrency("VND")
+      toast.success("Generated Test VietQR Code!")
+    })
+  }
+
   const handleGenerateQR = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsGenerating(true)
@@ -499,15 +548,28 @@ export default function QrGenerator() {
 
                 {/* Submit Button */}
                 {!generated ? (
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    size="lg"
-                    disabled={isGenerating || (paymentMode === 'crypto' && !agentAddress)}
-                  >
-                    {isGenerating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Generate QR Code
-                  </Button>
+                  <div className="space-y-3">
+                    <Button
+                      type="submit"
+                      className="w-full"
+                      size="lg"
+                      disabled={isGenerating || (paymentMode === 'crypto' && !agentAddress)}
+                    >
+                      {isGenerating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Generate QR Code
+                    </Button>
+
+                    {paymentMode === 'fiat' && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="w-full text-xs text-muted-foreground hover:text-primary"
+                        onClick={handleTestVietQR}
+                      >
+                        ⚡ Test with Official VietQR (Aeon Docs)
+                      </Button>
+                    )}
+                  </div>
                 ) : (
                   <Button type="button" onClick={handleReset} variant="outline" className="w-full">
                     Generate New QR

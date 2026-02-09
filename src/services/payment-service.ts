@@ -38,8 +38,8 @@ export async function executeAeonPayment(
     // Get user's agent wallet
     const { agentWallet } = await getAgentWallet(agentPrivateKey)
 
-    // Initialize Aeon client
-    const aeonClient = new AeonX402Client(false) // Production
+    // Initialize Aeon client (use sandbox for testing)
+    const aeonClient = new AeonX402Client(true) // Sandbox for testing
     aeonClient.setWallet(agentWallet)
 
     onProgress?.({
@@ -52,10 +52,40 @@ export async function executeAeonPayment(
     const appId = paymentRequest.metadata?.appId || import.meta.env.VITE_AEON_APP_ID
     const qrCode = paymentRequest.metadata?.qrCode || paymentRequest.resource
 
+    console.log('=== Aeon Payment Request ===')
+    console.log('App ID:', appId)
+    console.log('QR Code:', qrCode)
+
     const paymentInfo = await aeonClient.getPaymentInfo(appId, qrCode)
+
+    console.log('=== Aeon Payment Info Response ===')
+    console.log('Full Response:', JSON.stringify(paymentInfo, null, 2))
 
     if (paymentInfo.code !== '402') {
       throw new Error(`Unexpected Aeon response: ${paymentInfo.msg}`)
+    }
+
+    // Validate accepts array exists
+    if (!paymentInfo.accepts || paymentInfo.accepts.length === 0) {
+      throw new Error('Aeon returned no payment options (accepts array is empty)')
+    }
+
+    const acceptedPayment = paymentInfo.accepts[0]
+    console.log('=== Accepted Payment Details ===')
+    console.log('amountRequired:', acceptedPayment.amountRequired)
+    console.log('payToAddress:', acceptedPayment.payToAddress)
+    console.log('networkId:', acceptedPayment.networkId)
+    console.log('tokenAddress:', acceptedPayment.tokenAddress)
+
+    // Validate required fields (check both new and legacy field names)
+    const hasAmount = acceptedPayment.amountRequired || acceptedPayment.maxAmountRequired
+    const hasPayTo = acceptedPayment.payToAddress || acceptedPayment.payTo
+
+    if (!hasAmount) {
+      throw new Error('Aeon response missing payment amount (amountRequired)')
+    }
+    if (!hasPayTo) {
+      throw new Error('Aeon response missing payTo address (payToAddress)')
     }
 
     onProgress?.({
@@ -65,9 +95,11 @@ export async function executeAeonPayment(
     })
 
     // Create X-PAYMENT header
+    console.log('=== Creating X-PAYMENT Header ===')
     const xPaymentHeader = await aeonClient.createXPaymentHeader(
-      paymentInfo.accepts[0]
+      acceptedPayment
     )
+    console.log('X-PAYMENT Header created successfully, length:', xPaymentHeader.length)
 
     onProgress?.({
       stage: 'executing',
@@ -76,7 +108,12 @@ export async function executeAeonPayment(
     })
 
     // Submit payment with X-PAYMENT
+    console.log('=== Submitting Payment to Aeon ===')
     const result = await aeonClient.submitPayment(appId, qrCode, xPaymentHeader)
+    console.log('=== Aeon Submit Payment Result ===')
+    console.log('Status:', result.status)
+    console.log('Body:', JSON.stringify(result.body, null, 2))
+    console.log('X-Payment-Response:', result.xPaymentResponse)
 
     if (result.body.code === '0') {
       onProgress?.({
@@ -88,12 +125,13 @@ export async function executeAeonPayment(
       return {
         success: true,
         transactionHash: result.body.model?.txHash || result.xPaymentResponse?.txHash,
-        amount: paymentInfo.accepts[0].maxAmountRequired,
-        network: 'arbitrum',
+        amount: acceptedPayment.amountRequired || acceptedPayment.maxAmountRequired,
+        network: acceptedPayment.networkId || 'arbitrum',
         mode: 'aeon',
       }
     } else {
-      throw new Error(result.body.msg || 'Payment failed')
+      console.error('Aeon payment rejected:', result.body)
+      throw new Error(result.body.msg || result.body.error || 'Payment failed')
     }
   } catch (error: any) {
     console.error('Aeon payment error:', error)

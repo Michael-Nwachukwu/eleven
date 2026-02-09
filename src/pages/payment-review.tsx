@@ -78,8 +78,14 @@ export default function PaymentReview() {
         onProgress
       )
 
-      if (result.success && result.transactionHash) {
-        setTransactionHash(result.transactionHash)
+      console.log('=== Payment Result ===', result)
+
+      if (result.success) {
+        // For Aeon payments, there may not be an on-chain transaction hash
+        // The payment is settled via bank transfer
+        if (result.transactionHash) {
+          setTransactionHash(result.transactionHash)
+        }
         setProgress(100)
         setStage('complete')
         toast.success("Payment successful!")
@@ -88,7 +94,7 @@ export default function PaymentReview() {
         setTimeout(() => {
           navigate("/payment-success", {
             state: {
-              transactionHash: result.transactionHash,
+              transactionHash: result.transactionHash || 'aeon-settlement',
               paymentRequest,
               mode: result.mode
             }

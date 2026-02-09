@@ -8,7 +8,7 @@
  */
 
 import { signTypedData } from 'thirdweb/utils'
-import crypto from 'crypto'
+// Note: Using Web Crypto API instead of Node.js crypto for browser compatibility
 
 // =============================================================================
 // TYPES - Based on Aeon's API
@@ -16,21 +16,32 @@ import crypto from 'crypto'
 
 /**
  * The 402 response from Aeon's API (inside "accepts" array)
+ * Updated to match actual Aeon API field names
  */
 interface Aeon402Response {
-  maxAmountRequired: string;      // e.g., "550000" (atomic units)
-  payTo: `0x${string}`;           // Recipient address
-  asset: `0x${string}`;           // Token contract (USDC)
-  network: string;                // "base"
-  scheme: string;                 // "exact"
-  maxTimeoutSeconds: number;      // e.g., 60
-  resource: string;               // API endpoint
+  // Actual Aeon field names (from API response)
+  amountRequired: string;             // e.g., "550000000000000000" (atomic units)
+  payToAddress: `0x${string}`;        // Recipient address
+  tokenAddress: `0x${string}`;        // Token contract (USDC)
+  networkId: string;                  // "56" for BSC, "42161" for Arbitrum
+  scheme: string;                     // "exact"
+  resource: string;                   // API endpoint
   description?: string;
+  tokenSymbol?: string;               // "USDC"
+  tokenDecimals?: number;             // 18 for BSC, 6 for Arbitrum
+  amountRequiredFormat?: string;      // "humanReadable"
+  namespace?: string;                 // "evm"
   extra?: {
     orderNo: string;
     name: string;
     version: string;
   };
+  // Legacy field names (for backwards compatibility)
+  maxAmountRequired?: string;
+  payTo?: `0x${string}`;
+  asset?: `0x${string}`;
+  network?: string;
+  maxTimeoutSeconds?: number;
 }
 
 /**
@@ -116,25 +127,30 @@ const AEON_PAYMENT_TYPES = {
 // =============================================================================
 
 /**
- * Generate a random 32-byte nonce
+ * Generate a random 32-byte nonce using Web Crypto API (browser-compatible)
  */
 function generateNonce(): `0x${string}` {
-  const bytes = crypto.randomBytes(32);
-  return `0x${bytes.toString("hex")}` as `0x${string}`;
+  const bytes = new Uint8Array(32);
+  window.crypto.getRandomValues(bytes);
+  const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  return `0x${hex}` as `0x${string}`;
 }
 
 /**
- * Encode payload to base64 for X-PAYMENT header
+ * Encode payload to base64 for X-PAYMENT header (browser-compatible)
  */
 function encodePayload(payload: AeonXPaymentPayload): string {
-  return Buffer.from(JSON.stringify(payload)).toString("base64");
+  const jsonString = JSON.stringify(payload);
+  // Use btoa for browser compatibility
+  return btoa(jsonString);
 }
 
 /**
- * Decode base64 X-PAYMENT header (for debugging)
+ * Decode base64 X-PAYMENT header (for debugging, browser-compatible)
  */
 function decodePayload(base64: string): AeonXPaymentPayload {
-  return JSON.parse(Buffer.from(base64, "base64").toString("utf-8"));
+  // Use atob for browser compatibility
+  return JSON.parse(atob(base64));
 }
 
 // =============================================================================
@@ -177,17 +193,35 @@ class AeonX402Client {
       throw new Error("Wallet not set. Call setWallet() first.");
     }
 
-    const paymentAmount = amount || paymentInfo.maxAmountRequired;
+    // Use new field names with fallback to legacy names
+    const paymentAmount = amount || paymentInfo.amountRequired || paymentInfo.maxAmountRequired;
+    const payToAddress = paymentInfo.payToAddress || paymentInfo.payTo;
+    const tokenAddress = paymentInfo.tokenAddress || paymentInfo.asset;
+    const networkId = paymentInfo.networkId || paymentInfo.network;
+
+    // Validate required fields are present
+    if (!paymentAmount) {
+      throw new Error("Payment amount is missing from Aeon response");
+    }
+    if (!payToAddress) {
+      throw new Error("Pay-to address is missing from Aeon response");
+    }
+    if (!tokenAddress) {
+      throw new Error("Token address is missing from Aeon response");
+    }
+
     const now = Math.floor(Date.now() / 1000);
     const validAfter = now;
     const validBefore = now + (paymentInfo.maxTimeoutSeconds || 120);
     const nonce = generateNonce();
-    const chainId = CHAIN_IDS[paymentInfo.network] || 42161; // Default to Arbitrum One
+
+    // Map networkId to chainId
+    const chainId = networkId ? (CHAIN_IDS[networkId] || parseInt(networkId) || 42161) : 42161;
 
     // Create the authorization object
     const authorization: AeonAuthorization = {
       from: this.walletAddress,
-      to: paymentInfo.payTo,
+      to: payToAddress as `0x${string}`,
       value: paymentAmount,
       validAfter: validAfter.toString(),
       validBefore: validBefore.toString(),
@@ -200,10 +234,10 @@ class AeonX402Client {
       types: AEON_PAYMENT_TYPES,
       primaryType: "TransferWithAuthorization" as const,
       domain: {
-        name: "USD Coin",  // USDC token name
-        version: "2",      // USDC version
+        name: paymentInfo.extra?.name || "USD Coin",  // USDC token name
+        version: paymentInfo.extra?.version || "2",   // USDC version
         chainId: BigInt(chainId),
-        verifyingContract: paymentInfo.asset, // USDC contract
+        verifyingContract: tokenAddress as `0x${string}`,
       },
       message: {
         from: authorization.from,
@@ -223,7 +257,7 @@ class AeonX402Client {
     const payload: AeonXPaymentPayload = {
       x402Version: 1,
       scheme: paymentInfo.scheme,
-      network: paymentInfo.network,
+      network: networkId || "arbitrum",
       payload: {
         signature: signature as `0x${string}`,
         authorization: authorization,
