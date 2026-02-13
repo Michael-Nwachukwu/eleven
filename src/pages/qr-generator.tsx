@@ -7,14 +7,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { ArrowLeft, Download, Share2, Copy, CheckCircle2, Loader2, Info, AlertCircle, Building2 } from "lucide-react"
+import { ArrowLeft, Download, Share2, Copy, CheckCircle2, Loader2, Info, AlertCircle, Building2, RefreshCw } from "lucide-react"
 import { Link, useNavigate } from "react-router-dom"
 import { useState, useEffect } from "react"
 import { toast } from "sonner"
 import QRCode from "qrcode"
 import { encodeX402Payment, getTokenAddress, NETWORKS, type X402PaymentRequest } from "@/lib/x402"
 import { useAgentWallet } from "@/hooks/useAgentWallet"
-import { generateNigerianQRCode, getNigerianBanksList, NIGERIAN_BANKS } from "@/lib/nqr-generator"
+import { useAeonBanks } from "@/hooks/useAeonBanks"
 
 type TokenSymbol = "USDC" | "DAI" | "ETH"
 type NetworkKey = keyof typeof NETWORKS
@@ -38,17 +38,44 @@ export default function QrGenerator() {
   const [paymentMode, setPaymentMode] = useState<'crypto' | 'fiat'>('crypto')
 
   // Fiat specific fields - Bank Details
-  const [fiatCurrency, setFiatCurrency] = useState('NGN')
+  const [fiatCurrency] = useState('NGN')
   const [selectedBank, setSelectedBank] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
   const [accountName, setAccountName] = useState('')
-  const [merchantCity, setMerchantCity] = useState('Lagos')
+
+  // Use Aeon banks hook
+  const {
+    banks,
+    banksLoading,
+    banksError,
+    refetchBanks,
+    verifyAccount,
+    verificationLoading,
+    verificationError,
+    verifiedAccountName,
+    clearVerification
+  } = useAeonBanks()
 
   // Get agent wallet address
   const agentAddress = agent?.agentAddress || ""
 
-  // Get bank list for dropdown
-  const banksList = getNigerianBanksList()
+  // Auto-verify account when account number reaches 10 digits
+  useEffect(() => {
+    if (accountNumber.length === 10 && selectedBank && paymentMode === 'fiat') {
+      // Find the bank code from the selected bank
+      const bankCode = selectedBank
+      if (bankCode) {
+        verifyAccount(bankCode, accountNumber).then(name => {
+          if (name) {
+            setAccountName(name)
+            toast.success(`Account verified: ${name}`)
+          }
+        })
+      }
+    } else {
+      clearVerification()
+    }
+  }, [accountNumber, selectedBank, paymentMode, verifyAccount, clearVerification])
 
   // TEST FUNCTION: Generate a valid test payment request using Aeon's example VietQR
   const handleTestVietQR = () => {
@@ -94,7 +121,6 @@ export default function QrGenerator() {
       setGenerated(true)
       setPaymentMode('fiat')
       setAmount("10000")
-      setFiatCurrency("VND")
       toast.success("Generated Test VietQR Code!")
     })
   }
@@ -138,7 +164,7 @@ export default function QrGenerator() {
           }
         }
       } else {
-        // ===== FIAT PAYMENT (AEON) =====
+        // ===== FIAT PAYMENT (AEON BANK TRANSFER) =====
         // Validate bank details
         if (!selectedBank) {
           toast.error("Please select a bank")
@@ -150,55 +176,41 @@ export default function QrGenerator() {
           setIsGenerating(false)
           return
         }
-        if (!accountName) {
-          toast.error("Please enter the account name")
+        if (!accountName && !verifiedAccountName) {
+          toast.error("Please verify your account first")
           setIsGenerating(false)
           return
         }
 
-        // Generate NQR code from bank details
-        const bankCode = NIGERIAN_BANKS[selectedBank]?.code
-        if (!bankCode) {
+        // Find the selected bank details
+        const selectedBankData = banks.find(b => b.bankCode === selectedBank)
+        if (!selectedBankData) {
           toast.error("Invalid bank selected")
           setIsGenerating(false)
           return
         }
 
-        try {
-          generatedNQRCode = generateNigerianQRCode({
-            bankCode,
-            accountNumber,
-            accountName,
-            amount,
-            merchantCity,
-            reference: `PP-${Date.now()}`
-          })
-          console.log('Generated NQR Code:', generatedNQRCode)
-        } catch (err: any) {
-          toast.error(err.message || "Failed to generate NQR code")
-          setIsGenerating(false)
-          return
-        }
+        const finalAccountName = verifiedAccountName || accountName
 
         paymentRequest = {
           maxAmountRequired: amount,
-          resource: 'https://ai-api.aeon.xyz/open/ai/402/payment',
+          resource: 'aeon-bank-transfer', // Use bank transfer API, not x402
           payTo: '0x0000000000000000000000000000000000000000' as `0x${string}`,
           asset: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' as `0x${string}`, // USDC on Arbitrum
           network: 'arbitrum',
-          description: description || `Payment request for ${amount} ${fiatCurrency}`,
+          description: description || `Payment of ₦${amount} to ${finalAccountName}`,
           metadata: {
-            itemName: description || "Payment Request",
+            itemName: description || "Bank Transfer Payment",
             timestamp: Date.now(),
             mode: 'fiat',
-            provider: 'aeon',
+            provider: 'aeon-bank-transfer',
             appId: import.meta.env.VITE_AEON_APP_ID || 'TEST000001',
-            qrCode: generatedNQRCode,
             currency: fiatCurrency,
             originalAmount: amount,
-            bankName: NIGERIAN_BANKS[selectedBank]?.name,
+            bankCode: selectedBankData.bankCode,
+            bankName: selectedBankData.bankName,
             accountNumber: accountNumber,
-            accountName: accountName
+            accountName: finalAccountName,
           }
         }
       }
@@ -446,19 +458,31 @@ export default function QrGenerator() {
 
                     {/* Bank Selection */}
                     <div className="space-y-2">
-                      <Label>Select Bank *</Label>
+                      <div className="flex justify-between items-center">
+                        <Label>Select Bank *</Label>
+                        {banksLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {banksError && (
+                          <Button variant="ghost" size="sm" onClick={refetchBanks} className="h-6 px-2">
+                            <RefreshCw className="h-3 w-3 mr-1" /> Retry
+                          </Button>
+                        )}
+                      </div>
                       <Select
                         value={selectedBank}
-                        onValueChange={setSelectedBank}
-                        disabled={generated}
+                        onValueChange={(value) => {
+                          setSelectedBank(value)
+                          setAccountName('') // Clear when bank changes
+                          clearVerification()
+                        }}
+                        disabled={generated || banksLoading}
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="Choose your bank" />
+                          <SelectValue placeholder={banksLoading ? "Loading banks..." : "Choose your bank"} />
                         </SelectTrigger>
                         <SelectContent>
-                          {banksList.map((bank) => (
-                            <SelectItem key={bank.value} value={bank.value}>
-                              {bank.label}
+                          {banks.map((bank) => (
+                            <SelectItem key={bank.bankCode} value={bank.bankCode}>
+                              {bank.bankName}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -483,32 +507,39 @@ export default function QrGenerator() {
                       )}
                     </div>
 
-                    {/* Account Name */}
+                    {/* Account Name (Auto-verified or manual input) */}
                     <div className="space-y-2">
-                      <Label htmlFor="accountName">Account Name *</Label>
+                      <div className="flex justify-between items-center">
+                        <Label htmlFor="accountName">Account Name *</Label>
+                        {verificationLoading && (
+                          <span className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Loader2 className="h-3 w-3 animate-spin" /> Verifying...
+                          </span>
+                        )}
+                        {verifiedAccountName && (
+                          <span className="text-xs text-green-600 flex items-center gap-1">
+                            <CheckCircle2 className="h-3 w-3" /> Verified
+                          </span>
+                        )}
+                        {verificationError && !verifiedAccountName && (
+                          <span className="text-xs text-yellow-600 flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3" /> Enter manually
+                          </span>
+                        )}
+                      </div>
                       <Input
                         id="accountName"
                         type="text"
-                        placeholder="John Doe"
+                        placeholder={verificationLoading ? "Verifying..." : "Enter account holder name"}
                         value={accountName}
                         onChange={(e) => setAccountName(e.target.value.toUpperCase())}
-                        disabled={generated}
+                        disabled={generated || verificationLoading}
                         required
+                        className={verifiedAccountName ? "bg-green-50 border-green-200" : ""}
                       />
                     </div>
 
-                    {/* City */}
-                    <div className="space-y-2">
-                      <Label htmlFor="city">City</Label>
-                      <Input
-                        id="city"
-                        type="text"
-                        placeholder="Lagos"
-                        value={merchantCity}
-                        onChange={(e) => setMerchantCity(e.target.value)}
-                        disabled={generated}
-                      />
-                    </div>
+                    {/* Removed City field - not needed for Aeon bank transfer */}
 
                     {/* Info Banner */}
                     <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
@@ -614,7 +645,7 @@ export default function QrGenerator() {
                         {paymentMode === 'fiat' && selectedBank && (
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Bank:</span>
-                            <span className="font-semibold">{NIGERIAN_BANKS[selectedBank]?.name}</span>
+                            <span className="font-semibold">{banks.find(b => b.bankCode === selectedBank)?.bankName}</span>
                           </div>
                         )}
                         <div className="flex justify-between">

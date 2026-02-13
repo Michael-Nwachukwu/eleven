@@ -1,0 +1,333 @@
+/**
+ * Aeon Bank Transfer Service
+ * 
+ * Handles Nigeria bank transfers via Aeon's Native API Integration
+ * https://aeon-xyz.readme.io/docs/bank-transfer-create-order
+ * 
+ * Supports: NGN (Nigerian Naira) with bank account details
+ */
+
+// =============================================================================
+// CONFIGURATION
+// =============================================================================
+
+const AEON_SANDBOX_URL = 'https://ai-api-sbx.aeon.xyz'
+const AEON_PRODUCTION_URL = 'https://ai-api.aeon.xyz'
+
+// Sandbox credentials - replace with real credentials for production
+const SANDBOX_APP_ID = 'TEST000001'
+const SANDBOX_SIGN = 'TEST000001' // In production, this should be generated signature
+
+// =============================================================================
+// TYPES
+// =============================================================================
+
+export interface Bank {
+    bankCode: string
+    bankName: string
+}
+
+export interface AccountFormResponse {
+    code: string
+    msg: string
+    success: boolean
+    error: boolean
+    traceId: string
+    model?: {
+        fields: Array<{
+            fieldName: string
+            formElement: string
+            dataSourceKey: string
+            length: string
+            fieldType: string
+            regex: string
+        }>
+        dataSource: {
+            bankList: Bank[]
+        }
+    }
+}
+
+export interface BankAccountCheckResponse {
+    code: string
+    msg: string
+    success: boolean
+    error: boolean
+    traceId: string
+    model?: {
+        bankId: string | null
+        phoneNumber: string | null
+        accountName: string | null
+        accountNumber: string | null
+    }
+}
+
+export interface CreateOrderRequest {
+    amount: string
+    currency: 'NGN'
+    bankCode: string
+    bankName: string
+    bankAccountNumber: string
+    userId: string // Email or phone
+    userIp: string
+    email?: string
+    callbackUrl?: string
+    remark?: string
+}
+
+export interface CreateOrderResponse {
+    code: string
+    msg: string
+    success: boolean
+    error: boolean
+    traceId: string
+    model?: {
+        amount: string // USDC amount to pay
+        orderNo: string
+    }
+}
+
+export interface QueryOrderResponse {
+    code: string
+    msg: string
+    success: boolean
+    error: boolean
+    traceId: string
+    model?: {
+        orderNo: string
+        merchantOrderNo: string
+        status: string // PENDING, SUCCESS, FAILED
+        amount: string
+        currency: string
+        createTime: string
+        updateTime: string
+    }
+}
+
+// =============================================================================
+// AEON BANK TRANSFER CLIENT
+// =============================================================================
+
+export class AeonBankTransferClient {
+    private baseUrl: string
+    private appId: string
+    private apiKey: string | null = null
+
+    constructor(useSandbox: boolean = true) {
+        this.baseUrl = useSandbox ? AEON_SANDBOX_URL : AEON_PRODUCTION_URL
+        this.appId = import.meta.env.VITE_AEON_APP_ID || SANDBOX_APP_ID
+    }
+
+    /**
+     * Set API key for production use
+     */
+    setApiKey(apiKey: string) {
+        this.apiKey = apiKey
+    }
+
+    /**
+     * Generate request signature
+     * For sandbox, we use TEST000001
+     * For production, signature = SHA512(sorted params + apiKey)
+     */
+    private generateSign(_params: Record<string, any>): string {
+        if (!this.apiKey) {
+            // Sandbox mode - use simple sign
+            return SANDBOX_SIGN
+        }
+
+        // Production signature generation
+        // TODO: Implement proper SHA512 signing when we have real API key
+        // const sortedParams = Object.keys(params).sort().map(k => `${k}=${params[k]}`).join('&')
+        // return sha512(sortedParams + this.apiKey)
+        return SANDBOX_SIGN
+    }
+
+    /**
+     * Get Account Form - Fetches list of Nigerian banks
+     * POST /open/api/transfer/requiredField
+     */
+    async getAccountForm(currency: 'NGN' = 'NGN'): Promise<AccountFormResponse> {
+        const params = {
+            appId: this.appId,
+            currency,
+        }
+
+        const response = await fetch(`${this.baseUrl}/open/api/transfer/requiredField`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                ...params,
+                sign: this.generateSign(params),
+            }),
+        })
+
+        const data = await response.json()
+        console.log('=== Aeon Get Account Form Response ===', data)
+        return data as AccountFormResponse
+    }
+
+    /**
+     * Verify Bank Account - Checks if account exists and returns account name
+     * POST /open/api/bankCheck
+     */
+    async verifyBankAccount(
+        bankCode: string,
+        accountNumber: string,
+        currency: 'NGN' = 'NGN'
+    ): Promise<BankAccountCheckResponse> {
+        const params = {
+            appId: this.appId,
+            currency,
+            bankCode,
+            accountNumber,
+        }
+
+        const response = await fetch(`${this.baseUrl}/open/api/bankCheck`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                ...params,
+                sign: this.generateSign(params),
+            }),
+        })
+
+        const data = await response.json()
+        console.log('=== Aeon Bank Account Check Response ===', data)
+        return data as BankAccountCheckResponse
+    }
+
+    /**
+     * Create Bank Transfer Order - Creates payment order for NGN
+     * POST /open/api/transfer/payment
+     * 
+     * Returns the USDC amount that needs to be paid
+     */
+    async createOrder(request: CreateOrderRequest): Promise<CreateOrderResponse> {
+        const merchantOrderNo = `PP-${Date.now()}-${Math.random().toString(36).substring(7)}`
+
+        const params = {
+            appId: this.appId,
+            merchantOrderNo,
+            amount: request.amount,
+            currency: request.currency,
+            feeType: 'USER_BUCKLE', // User pays the fee
+            userId: request.userId,
+            userIp: request.userIp,
+            email: request.email || request.userId,
+            callbackUrl: request.callbackUrl || `${window.location.origin}/api/aeon/webhook`,
+            bankParam: {
+                bankCode: request.bankCode,
+                bankName: request.bankName,
+                bankAccountNumber: request.bankAccountNumber,
+            },
+            remark: request.remark || `Payment to ${request.bankName}`,
+        }
+
+        console.log('=== Aeon Create Order Request ===', params)
+
+        const response = await fetch(`${this.baseUrl}/open/api/transfer/payment`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                ...params,
+                sign: this.generateSign(params),
+            }),
+        })
+
+        const data = await response.json()
+        console.log('=== Aeon Create Order Response ===', data)
+        return data as CreateOrderResponse
+    }
+
+    /**
+     * Query Order Status
+     * POST /open/api/transfer/query
+     */
+    async queryOrder(orderNo: string): Promise<QueryOrderResponse> {
+        const params = {
+            appId: this.appId,
+            orderNo,
+        }
+
+        const response = await fetch(`${this.baseUrl}/open/api/order/query`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                ...params,
+                sign: this.generateSign(params),
+            }),
+        })
+
+        const data = await response.json()
+        console.log('=== Aeon Query Order Response ===', data)
+        return data as QueryOrderResponse
+    }
+
+    /**
+     * Get user's IP address
+     */
+    async getUserIp(): Promise<string> {
+        try {
+            const response = await fetch('https://api.ipify.org?format=json')
+            const data = await response.json()
+            return data.ip
+        } catch {
+            return '127.0.0.1'
+        }
+    }
+}
+
+// =============================================================================
+// SINGLETON INSTANCE
+// =============================================================================
+
+let bankTransferClient: AeonBankTransferClient | null = null
+
+export function getAeonBankTransferClient(useSandbox: boolean = true): AeonBankTransferClient {
+    if (!bankTransferClient) {
+        bankTransferClient = new AeonBankTransferClient(useSandbox)
+    }
+    return bankTransferClient
+}
+
+// =============================================================================
+// FALLBACK BANKS (used if Aeon API fails)
+// =============================================================================
+
+export const FALLBACK_NIGERIAN_BANKS: Bank[] = [
+    { bankCode: '044', bankName: 'Access Bank' },
+    { bankCode: '023', bankName: 'Citibank Nigeria' },
+    { bankCode: '050', bankName: 'Ecobank Nigeria' },
+    { bankCode: '084', bankName: 'Enterprise Bank' },
+    { bankCode: '070', bankName: 'Fidelity Bank' },
+    { bankCode: '011', bankName: 'First Bank of Nigeria' },
+    { bankCode: '214', bankName: 'First City Monument Bank' },
+    { bankCode: '058', bankName: 'Guaranty Trust Bank' },
+    { bankCode: '030', bankName: 'Heritage Bank' },
+    { bankCode: '301', bankName: 'Jaiz Bank' },
+    { bankCode: '082', bankName: 'Keystone Bank' },
+    { bankCode: '526', bankName: 'Parallex Bank' },
+    { bankCode: '076', bankName: 'Polaris Bank' },
+    { bankCode: '101', bankName: 'Providus Bank' },
+    { bankCode: '221', bankName: 'Stanbic IBTC Bank' },
+    { bankCode: '068', bankName: 'Standard Chartered Bank' },
+    { bankCode: '232', bankName: 'Sterling Bank' },
+    { bankCode: '100', bankName: 'Suntrust Bank' },
+    { bankCode: '032', bankName: 'Union Bank of Nigeria' },
+    { bankCode: '033', bankName: 'United Bank for Africa' },
+    { bankCode: '215', bankName: 'Unity Bank' },
+    { bankCode: '035', bankName: 'Wema Bank' },
+    { bankCode: '057', bankName: 'Zenith Bank' },
+    { bankCode: '999992', bankName: 'Opay' },
+    { bankCode: '100039', bankName: 'Paystack-Titan' },
+    { bankCode: '999991', bankName: 'PalmPay' },
+]
