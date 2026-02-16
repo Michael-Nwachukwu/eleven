@@ -4,6 +4,7 @@
  * Handles Nigeria bank transfers via Aeon's Native API Integration
  * https://aeon-xyz.readme.io/docs/bank-transfer-create-order
  * 
+ * All API calls go through /api/aeon/* proxy routes to avoid CORS.
  * Supports: NGN (Nigerian Naira) with bank account details
  */
 
@@ -11,8 +12,11 @@
 // CONFIGURATION
 // =============================================================================
 
-const AEON_SANDBOX_URL = 'https://ai-api-sbx.aeon.xyz'
-const AEON_PRODUCTION_URL = 'https://ai-api.aeon.xyz'
+// Proxy routes (Vercel serverless functions that forward to Aeon)
+const PROXY_BANKS = '/api/aeon/banks'
+const PROXY_VERIFY = '/api/aeon/verify'
+const PROXY_CREATE_ORDER = '/api/aeon/create-order'
+const PROXY_QUERY_ORDER = '/api/aeon/query-order'
 
 // Sandbox credentials - replace with real credentials for production
 const SANDBOX_APP_ID = 'TEST000001'
@@ -109,12 +113,10 @@ export interface QueryOrderResponse {
 // =============================================================================
 
 export class AeonBankTransferClient {
-    private baseUrl: string
     private appId: string
     private apiKey: string | null = null
 
-    constructor(useSandbox: boolean = true) {
-        this.baseUrl = useSandbox ? AEON_SANDBOX_URL : AEON_PRODUCTION_URL
+    constructor(_useSandbox: boolean = true) {
         this.appId = import.meta.env.VITE_AEON_APP_ID || SANDBOX_APP_ID
     }
 
@@ -145,7 +147,7 @@ export class AeonBankTransferClient {
 
     /**
      * Get Account Form - Fetches list of Nigerian banks
-     * POST /open/api/transfer/requiredField
+     * Proxied through /api/aeon/banks
      */
     async getAccountForm(currency: 'NGN' = 'NGN'): Promise<AccountFormResponse> {
         const params = {
@@ -153,7 +155,7 @@ export class AeonBankTransferClient {
             currency,
         }
 
-        const response = await fetch(`${this.baseUrl}/open/api/transfer/requiredField`, {
+        const response = await fetch(PROXY_BANKS, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -171,7 +173,7 @@ export class AeonBankTransferClient {
 
     /**
      * Verify Bank Account - Checks if account exists and returns account name
-     * POST /open/api/bankCheck
+     * Proxied through /api/aeon/verify
      */
     async verifyBankAccount(
         bankCode: string,
@@ -185,7 +187,7 @@ export class AeonBankTransferClient {
             accountNumber,
         }
 
-        const response = await fetch(`${this.baseUrl}/open/api/bankCheck`, {
+        const response = await fetch(PROXY_VERIFY, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -230,7 +232,7 @@ export class AeonBankTransferClient {
 
         console.log('=== Aeon Create Order Request ===', params)
 
-        const response = await fetch(`${this.baseUrl}/open/api/transfer/payment`, {
+        const response = await fetch(PROXY_CREATE_ORDER, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -256,7 +258,7 @@ export class AeonBankTransferClient {
             orderNo,
         }
 
-        const response = await fetch(`${this.baseUrl}/open/api/order/query`, {
+        const response = await fetch(PROXY_QUERY_ORDER, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

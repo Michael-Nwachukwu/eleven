@@ -4,27 +4,36 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, AlertCircle, CheckCircle2, Loader2, ExternalLink, Building2, Wallet } from "lucide-react"
+import { ArrowLeft, AlertCircle, CheckCircle2, Loader2, ExternalLink, Building2, Wallet, Zap } from "lucide-react"
 import { Link, useNavigate, useLocation } from "react-router-dom"
 import { useState, useEffect } from "react"
 import { toast } from "sonner"
 import { type X402PaymentRequest, formatAddress, formatAmount, NETWORKS, getExplorerUrl } from "@/lib/x402"
-import { executePayment, type PaymentProgress } from "@/services/payment-service"
-import { usePrivy } from "@privy-io/react-auth"
+import { executePayment, executeExternalWalletPayment, type PaymentProgress } from "@/services/payment-service"
+import { usePrivy, useWallets } from "@privy-io/react-auth"
 import { useAgentWallet } from "@/hooks/useAgentWallet"
 
 type PaymentStage = 'review' | 'checking' | 'bridging' | 'executing' | 'complete' | 'failed'
+type PaymentMethod = 'external' | 'agent' | null
+
+const EXTERNAL_FEE_PERCENT = 2.5
+const AGENT_FEE_PERCENT = 0.5
 
 export default function PaymentReview() {
   const navigate = useNavigate()
   const location = useLocation()
   const { user } = usePrivy()
+  const { wallets } = useWallets()
   const { agent, hasAgent } = useAgentWallet()
   const [stage, setStage] = useState<PaymentStage>('review')
   const [paymentRequest, setPaymentRequest] = useState<X402PaymentRequest | null>(null)
   const [transactionHash, setTransactionHash] = useState<string>('')
   const [errorMessage, setErrorMessage] = useState<string>('')
   const [progress, setProgress] = useState(0)
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(null)
+
+  // External wallet
+  const externalWallet = wallets.find(w => w.walletClientType !== 'privy')
 
   // Detect payment mode from metadata
   const isFiatPayment = paymentRequest?.metadata?.mode === 'fiat' || paymentRequest?.metadata?.provider === 'aeon'
@@ -44,6 +53,10 @@ export default function PaymentReview() {
 
   const handleConfirmPayment = async () => {
     if (!paymentRequest) return
+
+    if (paymentMethod === 'external') {
+      return handleExternalWalletPayment()
+    }
 
     setStage('checking')
     setProgress(10)
@@ -112,6 +125,62 @@ export default function PaymentReview() {
     }
   }
 
+  const handleExternalWalletPayment = async () => {
+    if (!paymentRequest || !externalWallet) return
+
+    setStage('checking')
+    setProgress(10)
+
+    try {
+      // Switch to Arbitrum if needed
+      if (externalWallet.chainId !== 'eip155:42161') {
+        try {
+          await externalWallet.switchChain(42161)
+        } catch {
+          throw new Error("Please switch your wallet to Arbitrum One")
+        }
+      }
+
+      const provider = await externalWallet.getEthereumProvider()
+
+      const onProgress = (progressInfo: PaymentProgress) => {
+        setStage(progressInfo.stage)
+        setProgress(progressInfo.progress)
+      }
+
+      const result = await executeExternalWalletPayment(
+        paymentRequest,
+        provider,
+        externalWallet.address,
+        onProgress
+      )
+
+      if (result.success) {
+        if (result.transactionHash) setTransactionHash(result.transactionHash)
+        setProgress(100)
+        setStage('complete')
+        toast.success("Payment successful!")
+
+        setTimeout(() => {
+          navigate("/payment-success", {
+            state: {
+              transactionHash: result.transactionHash,
+              paymentRequest,
+              mode: result.mode
+            }
+          })
+        }, 2000)
+      } else {
+        throw new Error(result.error || 'Payment failed')
+      }
+    } catch (error: any) {
+      console.error("External wallet payment error:", error)
+      setStage('failed')
+      setErrorMessage(error.message || "Payment failed. Please try again.")
+      toast.error("Payment failed")
+    }
+  }
+
   const handleCancel = () => {
     if (stage === 'review') {
       navigate("/payments")
@@ -122,6 +191,7 @@ export default function PaymentReview() {
     setStage('review')
     setProgress(0)
     setErrorMessage('')
+    setPaymentMethod(null)
   }
 
   if (!paymentRequest) {
@@ -168,6 +238,12 @@ export default function PaymentReview() {
   // === CRYPTO PAYMENT DISPLAY INFO ===
   const tokenSymbol = paymentRequest.metadata?.token || 'USDC'
   const cryptoAmount = paymentRequest.maxAmountRequired
+
+  // Fee calculation
+  const baseAmount = parseFloat(cryptoAmount)
+  const feePercent = paymentMethod === 'external' ? EXTERNAL_FEE_PERCENT : AGENT_FEE_PERCENT
+  const feeAmount = baseAmount * (feePercent / 100)
+  const totalAmount = baseAmount + feeAmount
 
   // Currency symbols
   const currencySymbols: Record<string, string> = {
@@ -466,19 +542,126 @@ export default function PaymentReview() {
             )}
           </CardContent>
 
-          <CardFooter className="flex gap-4 border-t pt-6">
+          <CardFooter className="flex flex-col gap-4 border-t pt-6">
             {stage === 'review' && (
               <>
-                <Button variant="outline" className="flex-1" onClick={handleCancel}>
-                  Cancel
-                </Button>
-                <Button
-                  className="flex-1"
-                  onClick={handleConfirmPayment}
-                  disabled={!hasAgent}
-                >
-                  {!hasAgent ? 'No Agent Wallet' : 'Confirm Payment'}
-                </Button>
+                {/* Crypto: payment method selection */}
+                {!isFiatPayment && !paymentMethod && (
+                  <div className="w-full space-y-3">
+                    <p className="text-sm font-medium text-center">Choose payment method</p>
+
+                    {/* External Wallet Option */}
+                    <button
+                      onClick={() => setPaymentMethod('external')}
+                      className="w-full p-4 rounded-lg border-2 border-muted hover:border-primary/50 transition-colors text-left space-y-1"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 font-medium">
+                          <Wallet className="h-4 w-4" />
+                          External Wallet
+                        </div>
+                        <Badge variant="secondary" className="text-xs">
+                          {EXTERNAL_FEE_PERCENT}% fee
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Pay directly from MetaMask, Coinbase Wallet, etc.
+                      </p>
+                    </button>
+
+                    {/* Agent Wallet Option */}
+                    <button
+                      onClick={() => setPaymentMethod('agent')}
+                      className="w-full p-4 rounded-lg border-2 border-muted hover:border-primary/50 transition-colors text-left space-y-1"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 font-medium">
+                          <Zap className="h-4 w-4" />
+                          Agent Wallet
+                        </div>
+                        <Badge variant="default" className="text-xs bg-green-600">
+                          {AGENT_FEE_PERCENT}% fee
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Pay from your funded agent wallet. Lower fees.
+                      </p>
+                    </button>
+
+                    <Button variant="outline" className="w-full" onClick={handleCancel}>
+                      Cancel
+                    </Button>
+                  </div>
+                )}
+
+                {/* Crypto: method selected → show fee breakdown + confirm */}
+                {!isFiatPayment && paymentMethod && (
+                  <div className="w-full space-y-3">
+                    <div className="p-3 rounded-lg bg-muted/30 space-y-1 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Method</span>
+                        <span className="font-medium">
+                          {paymentMethod === 'external' ? '🔗 External Wallet' : '⚡ Agent Wallet'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Base Amount</span>
+                        <span>{baseAmount.toFixed(4)} {tokenSymbol}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Fee ({feePercent}%)</span>
+                        <span>{feeAmount.toFixed(4)} {tokenSymbol}</span>
+                      </div>
+                      <div className="flex justify-between font-bold border-t pt-1">
+                        <span>Total</span>
+                        <span>{totalAmount.toFixed(4)} {tokenSymbol}</span>
+                      </div>
+                    </div>
+
+                    {paymentMethod === 'external' && !externalWallet && (
+                      <div className="text-center text-sm text-yellow-600 bg-yellow-50 p-2 rounded-lg">
+                        ⚠️ No external wallet connected.
+                      </div>
+                    )}
+                    {paymentMethod === 'agent' && !hasAgent && (
+                      <div className="text-center text-sm text-yellow-600 bg-yellow-50 p-2 rounded-lg">
+                        ⚠️ No agent wallet. <Link to="/create-agent" className="underline font-medium">Create one</Link>.
+                      </div>
+                    )}
+
+                    <div className="flex gap-3">
+                      <Button variant="outline" onClick={() => setPaymentMethod(null)}>
+                        Back
+                      </Button>
+                      <Button
+                        className="flex-1"
+                        onClick={handleConfirmPayment}
+                        disabled={
+                          (paymentMethod === 'external' && !externalWallet) ||
+                          (paymentMethod === 'agent' && !hasAgent)
+                        }
+                      >
+                        Pay {totalAmount.toFixed(2)} {tokenSymbol}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Fiat: always agent wallet */}
+                {isFiatPayment && (
+                  <div className="flex gap-4 w-full">
+                    <Button variant="outline" className="flex-1" onClick={handleCancel}>
+                      Cancel
+                    </Button>
+                    <Button
+                      className="flex-1"
+                      onClick={handleConfirmPayment}
+                      disabled={!hasAgent}
+                    >
+                      {!hasAgent ? 'No Agent Wallet' : 'Confirm Payment'}
+                    </Button>
+                  </div>
+                )}
               </>
             )}
 

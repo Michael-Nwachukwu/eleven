@@ -265,34 +265,43 @@ export default function QrGenerator() {
   }
 
   const handleShare = async () => {
-    if (!qrCodeDataUrl) return
+    if (!x402Uri) return
+
+    const paymentData = x402Uri.replace('x402://', '')
+    const paymentLink = `${window.location.origin}/pay/${paymentData}`
 
     try {
-      const response = await fetch(qrCodeDataUrl)
-      const blob = await response.blob()
-      const file = new File([blob], 'payment-qr.png', { type: 'image/png' })
+      const displayAmount = paymentMode === 'crypto' ? `${amount} ${token}` : `${amount} ${fiatCurrency}`
 
-      if (navigator.share && navigator.canShare({ files: [file] })) {
-        const displayAmount = paymentMode === 'crypto' ? `${amount} ${token}` : `${amount} ${fiatCurrency}`
+      if (navigator.share) {
         await navigator.share({
           title: `Payment Request: ${displayAmount}`,
-          text: `Scan to pay ${displayAmount}`,
-          files: [file],
+          text: `Pay ${displayAmount} via PayMe`,
+          url: paymentLink,
         })
-        toast.success("QR code shared!")
+        toast.success("Payment link shared!")
       } else {
-        await navigator.clipboard.writeText(x402Uri)
+        await navigator.clipboard.writeText(paymentLink)
         toast.success("Payment link copied to clipboard!")
       }
     } catch (error) {
       console.error("Error sharing:", error)
-      toast.error("Failed to share QR code")
+      // Fallback: copy link
+      await navigator.clipboard.writeText(paymentLink)
+      toast.success("Payment link copied to clipboard!")
     }
   }
 
   const handleCopyUri = () => {
     navigator.clipboard.writeText(x402Uri)
     toast.success("Payment URI copied to clipboard!")
+  }
+
+  const handleCopyPaymentLink = () => {
+    const paymentData = x402Uri.replace('x402://', '')
+    const paymentLink = `${window.location.origin}/pay/${paymentData}`
+    navigator.clipboard.writeText(paymentLink)
+    toast.success("Payment link copied!")
   }
 
   const handleReset = () => {
@@ -669,18 +678,35 @@ export default function QrGenerator() {
 
                 {/* Copy URI */}
                 <div className="w-full">
-                  <Label className="text-xs text-muted-foreground">x402 Payment URI</Label>
+                  <Label className="text-xs text-muted-foreground">Shareable Payment Link</Label>
+                  <div className="flex gap-2 mt-2">
+                    <Input
+                      value={x402Uri ? `${window.location.origin}/pay/${x402Uri.replace('x402://', '')}` : ''}
+                      readOnly
+                      className="font-mono text-xs"
+                    />
+                    <Button variant="ghost" size="sm" onClick={handleCopyPaymentLink}>
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* x402 URI (collapsed) */}
+                <details className="w-full">
+                  <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+                    Show x402 URI
+                  </summary>
                   <div className="flex gap-2 mt-2">
                     <Input value={x402Uri} readOnly className="font-mono text-xs" />
                     <Button variant="ghost" size="sm" onClick={handleCopyUri}>
                       <Copy className="h-4 w-4" />
                     </Button>
                   </div>
-                </div>
+                </details>
 
                 <p className="text-sm text-muted-foreground max-w-xs mx-auto">
                   {paymentMode === 'crypto'
-                    ? "Scan to send crypto directly to your agent wallet."
+                    ? "Scan QR or share the payment link to receive crypto."
                     : "Customer pays crypto, you receive Naira in your bank."}
                 </p>
               </div>

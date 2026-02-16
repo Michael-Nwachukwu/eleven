@@ -88,6 +88,9 @@ interface AeonXPaymentPayload {
 const AEON_SANDBOX_URL = "https://ai-api-sbx.aeon.xyz";
 const AEON_PROD_URL = "https://ai-api.aeon.xyz";
 
+// Proxy route for x402 payments (avoids CORS)
+const PROXY_X402 = "/api/aeon/x402-payment";
+
 // USDC on Arbitrum (6 decimals) - Native USDC
 const USDC_ARBITRUM = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 
@@ -268,7 +271,7 @@ class AeonX402Client {
   }
 
   /**
-   * Step 1: Get payment information from Aeon
+   * Step 1: Get payment information from Aeon (via proxy)
    */
   async getPaymentInfo(
     appId: string,
@@ -278,10 +281,11 @@ class AeonX402Client {
       throw new Error("Wallet not initialized. Call init() or setWallet() first.");
     }
 
-    const url = new URL(`${this.baseUrl}/open/ai/402/payment`);
+    const url = new URL(PROXY_X402, window.location.origin);
     url.searchParams.set("appId", appId);
     url.searchParams.set("qrCode", qrCode);
     url.searchParams.set("address", this.walletAddress);
+    url.searchParams.set("sandbox", this.baseUrl === AEON_SANDBOX_URL ? "true" : "false");
 
     const response = await fetch(url.toString());
     const data = await response.json();
@@ -290,7 +294,7 @@ class AeonX402Client {
   }
 
   /**
-   * Step 2: Submit payment with X-PAYMENT header
+   * Step 2: Submit payment with X-PAYMENT header (via proxy)
    */
   async submitPayment(
     appId: string,
@@ -301,10 +305,11 @@ class AeonX402Client {
       throw new Error("Wallet not initialized. Call init() or setWallet() first.");
     }
 
-    const url = new URL(`${this.baseUrl}/open/ai/402/payment`);
+    const url = new URL(PROXY_X402, window.location.origin);
     url.searchParams.set("appId", appId);
     url.searchParams.set("qrCode", qrCode);
     url.searchParams.set("address", this.walletAddress);
+    url.searchParams.set("sandbox", this.baseUrl === AEON_SANDBOX_URL ? "true" : "false");
 
     const response = await fetch(url.toString(), {
       headers: {

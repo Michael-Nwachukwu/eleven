@@ -15,6 +15,7 @@ import PaymentReview from "./pages/payment-review"
 import PaymentSuccess from "./pages/payment-success"
 import AgentSettings from "./pages/agent-settings"
 import Strategies from "./pages/strategies"
+import PayPage from "./pages/pay"
 import { Toaster } from "./components/ui/sonner"
 
 function App() {
@@ -34,6 +35,7 @@ function App() {
           <Route path="/payment-success" element={<PaymentSuccess />} />
           <Route path="/agent-settings" element={<AgentSettings />} />
           <Route path="/strategies" element={<Strategies />} />
+          <Route path="/pay/:paymentData" element={<PayPage />} />
         </Routes>
         <ThemeSwitcher />
         <Toaster />

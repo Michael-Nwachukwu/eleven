@@ -26,6 +26,11 @@ export default function FundAgent() {
   const [showQR, setShowQR] = useState(false)
   const [fundingAmount, setFundingAmount] = useState("0.05")
   const [isTransferring, setIsTransferring] = useState(false)
+  const [fundingToken, setFundingToken] = useState<'ETH' | 'USDC'>('ETH')
+
+  // USDC contract on Arbitrum One
+  const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
+  const USDC_DECIMALS = 6
 
   // Get agent address
   const agentAddress = agent?.agentAddress
@@ -102,16 +107,46 @@ export default function FundAgent() {
       }
 
       const provider = await externalWallet.getEthereumProvider()
-      const amountWei = parseEther(fundingAmount)
 
-      const hash = await provider.request({
-        method: 'eth_sendTransaction',
-        params: [{
-          from: externalWallet.address,
-          to: agentAddress as `0x${string}`,
-          value: `0x${amountWei.toString(16)}`, // amount in hex
-        }]
-      })
+      let hash: string
+
+      if (fundingToken === 'ETH') {
+        // ETH transfer
+        const amountWei = parseEther(fundingAmount)
+        hash = await provider.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from: externalWallet.address,
+            to: agentAddress as `0x${string}`,
+            value: `0x${amountWei.toString(16)}`,
+          }]
+        })
+      } else {
+        // USDC ERC-20 transfer
+        const amountFloat = parseFloat(fundingAmount)
+        if (isNaN(amountFloat) || amountFloat <= 0) {
+          toast.error("Invalid amount")
+          setIsTransferring(false)
+          return
+        }
+        const atomicAmount = BigInt(Math.round(amountFloat * (10 ** USDC_DECIMALS)))
+
+        // Encode transfer(address,uint256)
+        const transferSelector = '0xa9059cbb'
+        const paddedTo = (agentAddress as string).slice(2).padStart(64, '0')
+        const paddedAmount = atomicAmount.toString(16).padStart(64, '0')
+        const data = `${transferSelector}${paddedTo}${paddedAmount}`
+
+        hash = await provider.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from: externalWallet.address,
+            to: USDC_ADDRESS,
+            data,
+            value: '0x0',
+          }]
+        })
+      }
 
       toast.success("Transaction sent!", {
         description: `Tx Hash: ${hash}`
@@ -242,9 +277,28 @@ export default function FundAgent() {
                     value={fundingAmount}
                     onChange={(e) => setFundingAmount(e.target.value)}
                     className="w-24"
-                    step="0.01"
+                    step={fundingToken === 'ETH' ? '0.01' : '1'}
                   />
-                  <span className="text-sm font-medium">ETH</span>
+                  <div className="flex rounded-md border overflow-hidden">
+                    <button
+                      onClick={() => { setFundingToken('ETH'); setFundingAmount('0.05') }}
+                      className={`px-3 py-2 text-sm font-medium transition-colors ${fundingToken === 'ETH'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted/50 hover:bg-muted'
+                        }`}
+                    >
+                      ETH
+                    </button>
+                    <button
+                      onClick={() => { setFundingToken('USDC'); setFundingAmount('10') }}
+                      className={`px-3 py-2 text-sm font-medium transition-colors ${fundingToken === 'USDC'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted/50 hover:bg-muted'
+                        }`}
+                    >
+                      USDC
+                    </button>
+                  </div>
                 </div>
 
                 <Button
@@ -253,10 +307,10 @@ export default function FundAgent() {
                   disabled={isTransferring}
                 >
                   {isTransferring && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {externalWallet ? `Send ${fundingAmount} ETH from ${externalWallet.walletClientType}` : "Connect Wallet to Send"}
+                  {externalWallet ? `Send ${fundingAmount} ${fundingToken} from ${externalWallet.walletClientType}` : "Connect Wallet to Send"}
                 </Button>
                 <p className="text-xs text-muted-foreground">
-                  Connect your MetaMask, Coinbase, or other wallet to transfer funds directly.
+                  Connect your MetaMask, Coinbase, or other wallet to transfer {fundingToken} directly.
                 </p>
               </CardContent>
             </Card>

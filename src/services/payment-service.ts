@@ -1,16 +1,32 @@
 import { AeonX402Client } from './aeon-x402-clientt'
 import { getAgentWallet } from './thirdweb-agent-service'
 import type { X402PaymentRequest } from '@/lib/x402'
-import { prepareContractCall, sendTransaction, getContract } from 'thirdweb'
+import { prepareContractCall, sendTransaction, getContract, waitForReceipt } from 'thirdweb'
 import { thirdwebClient } from './thirdweb-agent-service'
 import { arbitrum } from 'thirdweb/chains'
+
+// =============================================================================
+// Payment Splitter Constants
+// =============================================================================
+
+const USDC_DECIMALS = 6
+const EXTERNAL_WALLET_FEE_BPS = 250  // 2.5%
+const AGENT_WALLET_FEE_BPS = 50     // 0.5%
+
+// Set this after deploying the PaymentSplitter contract
+const SPLITTER_ADDRESS = import.meta.env.VITE_SPLITTER_ADDRESS || ''
+
+// ABI selectors for raw encoding (external wallet path)
+const APPROVE_SELECTOR = '0x095ea7b3'      // approve(address,uint256)
+const SPLIT_PAYMENT_SELECTOR = '0x2cdb5a08' // splitPayment(address,address,uint256,uint256)
 
 export interface PaymentResult {
   success: boolean
   transactionHash?: string
   amount?: string
+  fee?: string
   network: string
-  mode: 'aeon' | 'crypto'
+  mode: 'aeon' | 'crypto' | 'external'
   error?: string
 }
 
@@ -152,7 +168,7 @@ export async function executeAeonPayment(
 }
 
 /**
- * Execute direct crypto-to-crypto payment
+ * Execute direct crypto payment via agent wallet using PaymentSplitter
  */
 export async function executeCryptoPayment(
   paymentRequest: X402PaymentRequest,
@@ -166,39 +182,69 @@ export async function executeCryptoPayment(
       progress: 20,
     })
 
+    if (!SPLITTER_ADDRESS) {
+      throw new Error('Payment splitter not configured. Set VITE_SPLITTER_ADDRESS in .env')
+    }
+
     // Get user's agent wallet
     const { agentWallet } = await getAgentWallet(agentPrivateKey)
 
-    // Get USDC contract on Arbitrum
-    const usdcContract = getContract({
-      client: thirdwebClient,
-      address: paymentRequest.asset,
-      chain: arbitrum, // Use Arbitrum One mainnet
-    })
-
-    onProgress?.({
-      stage: 'executing',
-      message: 'Executing USDC transfer...',
-      progress: 60,
-    })
-
-    // Prepare transfer transaction
-    const transaction = prepareContractCall({
-      contract: usdcContract,
-      method: 'function transfer(address to, uint256 amount) returns (bool)',
-      params: [paymentRequest.payTo, BigInt(paymentRequest.maxAmountRequired)],
-    })
-
-    // Send transaction
     const account = agentWallet.getAccount()
     if (!account) {
       throw new Error('Agent wallet account not available')
     }
 
-    const result = await sendTransaction({
-      transaction,
-      account,
+    // Parse amount
+    const amountFloat = parseFloat(paymentRequest.maxAmountRequired)
+    if (isNaN(amountFloat) || amountFloat <= 0) {
+      throw new Error(`Invalid payment amount: ${paymentRequest.maxAmountRequired}`)
+    }
+    const baseAtomicAmount = BigInt(Math.round(amountFloat * (10 ** USDC_DECIMALS)))
+    const feeAtomicAmount = (baseAtomicAmount * BigInt(AGENT_WALLET_FEE_BPS)) / BigInt(10000)
+    const totalAtomicAmount = baseAtomicAmount + feeAtomicAmount
+
+    onProgress?.({
+      stage: 'executing',
+      message: 'Approving USDC spend...',
+      progress: 40,
     })
+
+    // Step 1: Approve the splitter to spend USDC
+    const usdcContract = getContract({
+      client: thirdwebClient,
+      address: paymentRequest.asset,
+      chain: arbitrum,
+    })
+
+    const approveTx = prepareContractCall({
+      contract: usdcContract,
+      method: 'function approve(address spender, uint256 amount) returns (bool)',
+      params: [SPLITTER_ADDRESS, totalAtomicAmount],
+    })
+
+    const approveResult = await sendTransaction({ transaction: approveTx, account })
+    await waitForReceipt({ client: thirdwebClient, chain: arbitrum, transactionHash: approveResult.transactionHash })
+
+    onProgress?.({
+      stage: 'executing',
+      message: 'Executing split payment...',
+      progress: 70,
+    })
+
+    // Step 2: Call splitPayment on the splitter
+    const splitterContract = getContract({
+      client: thirdwebClient,
+      address: SPLITTER_ADDRESS,
+      chain: arbitrum,
+    })
+
+    const splitTx = prepareContractCall({
+      contract: splitterContract,
+      method: 'function splitPayment(address token, address recipient, uint256 amount, uint256 feeBps)',
+      params: [paymentRequest.asset, paymentRequest.payTo, baseAtomicAmount, BigInt(AGENT_WALLET_FEE_BPS)],
+    })
+
+    const result = await sendTransaction({ transaction: splitTx, account })
 
     onProgress?.({
       stage: 'complete',
@@ -206,10 +252,13 @@ export async function executeCryptoPayment(
       progress: 100,
     })
 
+    const feeFloat = Number(feeAtomicAmount) / (10 ** USDC_DECIMALS)
+
     return {
       success: true,
       transactionHash: result.transactionHash,
       amount: paymentRequest.maxAmountRequired,
+      fee: feeFloat.toFixed(USDC_DECIMALS),
       network: 'arbitrum',
       mode: 'crypto',
     }
@@ -354,5 +403,122 @@ export async function executePayment(
   } else {
     // Direct crypto payment
     return executeCryptoPayment(paymentRequest, agentPrivateKey, onProgress)
+  }
+}
+
+// =============================================================================
+// EXTERNAL WALLET PAYMENT (via PaymentSplitter with 2.5% fee)
+// =============================================================================
+
+/**
+ * Helper: pad a hex value to 32 bytes (64 hex chars)
+ */
+function padHex(value: string, length = 64): string {
+  return value.replace('0x', '').padStart(length, '0')
+}
+
+/**
+ * Execute payment using user's connected external wallet via PaymentSplitter.
+ * Two transactions: (1) approve splitter, (2) call splitPayment.
+ */
+export async function executeExternalWalletPayment(
+  paymentRequest: X402PaymentRequest,
+  walletProvider: any,
+  walletAddress: string,
+  onProgress?: (progress: PaymentProgress) => void
+): Promise<PaymentResult> {
+  try {
+    if (!SPLITTER_ADDRESS) {
+      throw new Error('Payment splitter not configured. Set VITE_SPLITTER_ADDRESS in .env')
+    }
+
+    onProgress?.({
+      stage: 'checking',
+      message: 'Preparing payment...',
+      progress: 10,
+    })
+
+    // Calculate amounts
+    const baseAmount = parseFloat(paymentRequest.maxAmountRequired)
+    if (isNaN(baseAmount) || baseAmount <= 0) {
+      throw new Error(`Invalid payment amount: ${paymentRequest.maxAmountRequired}`)
+    }
+
+    const feeAmount = baseAmount * (EXTERNAL_WALLET_FEE_BPS / 10000)
+    const totalAmount = baseAmount + feeAmount
+    const baseAtomicAmount = BigInt(Math.round(baseAmount * (10 ** USDC_DECIMALS)))
+    const totalAtomicAmount = BigInt(Math.round(totalAmount * (10 ** USDC_DECIMALS)))
+
+    onProgress?.({
+      stage: 'executing',
+      message: 'Approve USDC spend in your wallet...',
+      progress: 30,
+    })
+
+    // Step 1: Approve the splitter to spend USDC
+    const approveData = `${APPROVE_SELECTOR}${padHex(SPLITTER_ADDRESS.slice(2))}${padHex(totalAtomicAmount.toString(16))}`
+
+    await walletProvider.request({
+      method: 'eth_sendTransaction',
+      params: [{
+        from: walletAddress,
+        to: paymentRequest.asset, // USDC contract
+        data: approveData,
+        value: '0x0',
+      }],
+    })
+
+    // Brief wait for approval to confirm
+    await new Promise(resolve => setTimeout(resolve, 3000))
+
+    onProgress?.({
+      stage: 'executing',
+      message: 'Confirm the payment in your wallet...',
+      progress: 60,
+    })
+
+    // Step 2: Call splitPayment on the splitter
+    // splitPayment(address token, address recipient, uint256 amount, uint256 feeBps)
+    const splitData = `${SPLIT_PAYMENT_SELECTOR}${padHex(paymentRequest.asset.slice(2))}${padHex(paymentRequest.payTo.slice(2))}${padHex(baseAtomicAmount.toString(16))}${padHex(BigInt(EXTERNAL_WALLET_FEE_BPS).toString(16))}`
+
+    const txHash = await walletProvider.request({
+      method: 'eth_sendTransaction',
+      params: [{
+        from: walletAddress,
+        to: SPLITTER_ADDRESS,
+        data: splitData,
+        value: '0x0',
+      }],
+    })
+
+    onProgress?.({
+      stage: 'complete',
+      message: 'Payment sent successfully!',
+      progress: 100,
+    })
+
+    return {
+      success: true,
+      transactionHash: txHash,
+      amount: baseAmount.toFixed(USDC_DECIMALS),
+      fee: feeAmount.toFixed(USDC_DECIMALS),
+      network: 'arbitrum',
+      mode: 'external',
+    }
+  } catch (error: any) {
+    console.error('External wallet payment error:', error)
+
+    onProgress?.({
+      stage: 'failed',
+      message: error.message || 'External wallet payment failed',
+      progress: 0,
+    })
+
+    return {
+      success: false,
+      network: 'arbitrum',
+      mode: 'external',
+      error: error.message || 'External wallet payment failed',
+    }
   }
 }
