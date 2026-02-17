@@ -1,6 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { createAgentWallet as createAgentWalletInDB, getAgentByUserId } from '../../src/lib/db'
-import { createAgentWallet as createThirdwebWallet } from '../../src/services/thirdweb-agent-service'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     // CORS headers
@@ -17,6 +15,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     try {
+        // Dynamic imports to avoid ESM/CJS cycle on Node v24
+        const { createAgentWallet: createAgentWalletInDB, getAgentByUserId } = await import('../../src/lib/db')
+        const { createThirdwebClient } = await import('thirdweb')
+        const { privateKeyAccount } = await import('thirdweb/wallets')
+
         const { userId } = req.body
 
         if (!userId) {
@@ -37,8 +40,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             })
         }
 
-        // Create ThirdWeb wallet
-        const { adminAddress, agentAddress, privateKey } = await createThirdwebWallet(userId)
+        // Create ThirdWeb client using process.env (server-side)
+        const client = createThirdwebClient({
+            clientId: process.env.VITE_THIRDWEB_CLIENT_ID || '',
+        })
+
+        // Generate a random private key
+        const privateKey = `0x${Array.from({ length: 64 }, () =>
+            Math.floor(Math.random() * 16).toString(16)
+        ).join('')}` as `0x${string}`
+
+        // Create admin account from private key
+        const adminAccount = privateKeyAccount({
+            client,
+            privateKey,
+        })
+
+        const adminAddress = adminAccount.address
+        const agentAddress = adminAccount.address // Use same address for now
 
         // Store in database with encrypted private key
         const agent = await createAgentWalletInDB(
@@ -48,12 +67,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             privateKey
         )
 
-        // Return agent info (without private key)
+        // Return agent info including private key (for client-side signing)
         return res.status(201).json({
             id: agent.id,
             adminAddress: agent.adminAddress,
             agentAddress: agent.agentAddress,
-            createdAt: agent.createdAt
+            createdAt: agent.createdAt,
+            privateKey: privateKey // Return the raw private key once
         })
 
     } catch (error: any) {

@@ -3,54 +3,44 @@
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { QrCode, Send, Scan, ArrowDownToLine, Loader2, ExternalLink, Wallet, AlertCircle, CheckCircle2, Copy } from "lucide-react"
-import { Link } from "react-router-dom"
+import { QrCode, Scan, Loader2, ExternalLink, Wallet, CheckCircle2, Copy, AlertCircle, ChevronDown, ChevronUp, History } from "lucide-react"
+import { Link, Navigate } from "react-router-dom"
 import { useState, useEffect } from "react"
 import { toast } from "sonner"
 import { useAgentWallet } from "@/hooks/useAgentWallet"
 import { usePrivy } from "@privy-io/react-auth"
-import { getAgentWallet } from "@/services/thirdweb-agent-service"
-import { prepareContractCall, sendTransaction, getContract, readContract } from "thirdweb"
+import { readContract } from "thirdweb"
 import { thirdwebClient } from "@/services/thirdweb-agent-service"
 import { arbitrum } from "thirdweb/chains"
-import { parseUnits, formatUnits } from "viem"
+import { formatUnits } from "viem"
+import QRCode from "qrcode"
+import { PaymentOrder, PaymentFulfillment } from "@/lib/db"
 
-type TokenSymbol = "USDC" | "ETH"
-
-// Token addresses on Arbitrum
-const TOKEN_ADDRESSES: Record<TokenSymbol, string> = {
-  USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-  ETH: "0x0000000000000000000000000000000000000000", // Native ETH
-}
+// USDC contract on Arbitrum
+const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
 
 export default function Payments() {
   const { agent, loading: agentLoading, hasAgent } = useAgentWallet()
-  const { user } = usePrivy()
+  const { user, authenticated, ready } = usePrivy()
 
   // Balances
   const [usdcBalance, setUsdcBalance] = useState<string>("0.00")
   const [ethBalance, setEthBalance] = useState<string>("0.00")
   const [loadingBalances, setLoadingBalances] = useState(false)
 
-  // Send form state
-  const [recipient, setRecipient] = useState("")
-  const [sendAmount, setSendAmount] = useState("")
-  const [sendToken, setSendToken] = useState<TokenSymbol>("USDC")
-  const [isSending, setIsSending] = useState(false)
+  // Orders State
+  const [orders, setOrders] = useState<PaymentOrder[]>([])
+  const [loadingOrders, setLoadingOrders] = useState(false)
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
+  const [orderFulfillments, setOrderFulfillments] = useState<Record<string, PaymentFulfillment[]>>({})
+  const [orderQrCodes, setOrderQrCodes] = useState<Record<string, string>>({})
+  const [loadingFulfillments, setLoadingFulfillments] = useState<string | null>(null)
 
-  // Withdraw form state
-  const [withdrawAddress, setWithdrawAddress] = useState("")
-  const [withdrawAmount, setWithdrawAmount] = useState("")
-  const [withdrawToken, setWithdrawToken] = useState<TokenSymbol>("USDC")
-  const [isWithdrawing, setIsWithdrawing] = useState(false)
-
-  // Transaction result
-  const [lastTxHash, setLastTxHash] = useState<string>("")
+  // Auth check
+  if (ready && !authenticated) {
+    return <Navigate to="/" />
+  }
 
   // Load balances
   useEffect(() => {
@@ -59,24 +49,29 @@ export default function Payments() {
     }
   }, [agent?.agentAddress])
 
+  // Load orders
+  useEffect(() => {
+    if (user?.id) {
+      loadOrders()
+    }
+  }, [user?.id])
+
   const loadBalances = async () => {
     if (!agent?.agentAddress) return
     setLoadingBalances(true)
 
     try {
       // Get USDC balance
-      const usdcContract = getContract({
-        client: thirdwebClient,
-        address: TOKEN_ADDRESSES.USDC,
-        chain: arbitrum,
-      })
-
-      const usdcBal = await readContract({
-        contract: usdcContract,
-        method: "function balanceOf(address account) view returns (uint256)",
+      const usdcBalanceRaw = await readContract({
+        contract: {
+          client: thirdwebClient,
+          chain: arbitrum,
+          address: USDC_ADDRESS,
+        },
+        method: "function balanceOf(address) view returns (uint256)",
         params: [agent.agentAddress as `0x${string}`],
       })
-      setUsdcBalance(formatUnits(usdcBal, 6))
+      setUsdcBalance(formatUnits(usdcBalanceRaw, 6))
 
       // Get ETH balance via RPC
       const rpcUrl = "https://arb1.arbitrum.io/rpc"
@@ -101,174 +96,60 @@ export default function Payments() {
     }
   }
 
-  const handleSend = async () => {
-    if (!recipient || !sendAmount || parseFloat(sendAmount) <= 0) {
-      toast.error("Please enter a valid recipient and amount")
-      return
-    }
-
-    if (!user?.id) {
-      toast.error("Please sign in first")
-      return
-    }
-
-    // Validate recipient address
-    if (!recipient.startsWith("0x") || recipient.length !== 42) {
-      toast.error("Invalid recipient address")
-      return
-    }
-
-    setIsSending(true)
+  const loadOrders = async () => {
+    if (!user?.id) return
+    setLoadingOrders(true)
     try {
-      // Get agent private key from localStorage (dev mode)
-      const privateKey = localStorage.getItem(`agent_pk_${user.id}`)
-      if (!privateKey) {
-        throw new Error("Agent private key not found. Please recreate your agent.")
+      const response = await fetch(`/api/payment/orders?userId=${user.id}`)
+      if (response.ok) {
+        const data = await response.json()
+        setOrders(data.orders || [])
       }
-
-      const { agentWallet } = await getAgentWallet(privateKey)
-      const account = agentWallet.getAccount()
-      if (!account) throw new Error("Could not get agent account")
-
-      let txHash: string
-
-      if (sendToken === "ETH") {
-        // Native ETH transfer
-        // For smart wallets, we need to use a different approach
-        toast.error("ETH transfers not yet supported for smart wallets")
-        setIsSending(false)
-        return
-      } else {
-        // USDC transfer
-        const usdcContract = getContract({
-          client: thirdwebClient,
-          address: TOKEN_ADDRESSES.USDC,
-          chain: arbitrum,
-        })
-
-        const amountInUnits = parseUnits(sendAmount, 6)
-
-        const transaction = prepareContractCall({
-          contract: usdcContract,
-          method: "function transfer(address to, uint256 amount) returns (bool)",
-          params: [recipient as `0x${string}`, amountInUnits],
-        })
-
-        const result = await sendTransaction({
-          transaction,
-          account,
-        })
-
-        txHash = result.transactionHash
-      }
-
-      setLastTxHash(txHash)
-      toast.success("Payment sent successfully!")
-
-      // Reset form and reload balances
-      setRecipient("")
-      setSendAmount("")
-      await loadBalances()
-
-    } catch (error: any) {
-      console.error("Send error:", error)
-      toast.error(error.message || "Failed to send payment")
+    } catch (error) {
+      console.error("Error loading orders:", error)
+      toast.error("Failed to load payment orders")
     } finally {
-      setIsSending(false)
+      setLoadingOrders(false)
     }
   }
 
-  const handleWithdraw = async () => {
-    if (!withdrawAddress || !withdrawAmount || parseFloat(withdrawAmount) <= 0) {
-      toast.error("Please enter a valid withdrawal address and amount")
+  const toggleOrderExpand = async (order: PaymentOrder) => {
+    if (expandedOrderId === order.id) {
+      setExpandedOrderId(null)
       return
     }
 
-    if (!user?.id) {
-      toast.error("Please sign in first")
-      return
-    }
+    setExpandedOrderId(order.id)
 
-    // Validate address
-    if (!withdrawAddress.startsWith("0x") || withdrawAddress.length !== 42) {
-      toast.error("Invalid withdrawal address")
-      return
-    }
-
-    // Check balance
-    const currentBalance = withdrawToken === "USDC" ? parseFloat(usdcBalance) : parseFloat(ethBalance)
-    if (parseFloat(withdrawAmount) > currentBalance) {
-      toast.error(`Insufficient ${withdrawToken} balance`)
-      return
-    }
-
-    setIsWithdrawing(true)
-    try {
-      // Get agent private key from localStorage (dev mode)
-      const privateKey = localStorage.getItem(`agent_pk_${user.id}`)
-      if (!privateKey) {
-        throw new Error("Agent private key not found. Please recreate your agent.")
+    // Generate QR if missing
+    if (!orderQrCodes[order.id] && order.x402Uri) {
+      try {
+        const qrDataUrl = await QRCode.toDataURL(order.x402Uri, {
+          errorCorrectionLevel: 'M',
+          type: 'image/png',
+          width: 200,
+          margin: 1,
+        })
+        setOrderQrCodes(prev => ({ ...prev, [order.id]: qrDataUrl }))
+      } catch (err) {
+        console.error("Error generating QR:", err)
       }
-
-      const { agentWallet } = await getAgentWallet(privateKey)
-      const account = agentWallet.getAccount()
-      if (!account) throw new Error("Could not get agent account")
-
-      let txHash: string
-
-      if (withdrawToken === "ETH") {
-        toast.error("ETH withdrawals not yet supported for smart wallets")
-        setIsWithdrawing(false)
-        return
-      } else {
-        // USDC withdrawal
-        const usdcContract = getContract({
-          client: thirdwebClient,
-          address: TOKEN_ADDRESSES.USDC,
-          chain: arbitrum,
-        })
-
-        const amountInUnits = parseUnits(withdrawAmount, 6)
-
-        const transaction = prepareContractCall({
-          contract: usdcContract,
-          method: "function transfer(address to, uint256 amount) returns (bool)",
-          params: [withdrawAddress as `0x${string}`, amountInUnits],
-        })
-
-        const result = await sendTransaction({
-          transaction,
-          account,
-        })
-
-        txHash = result.transactionHash
-      }
-
-      setLastTxHash(txHash)
-      toast.success("Withdrawal successful!")
-
-      // Reset form and reload balances
-      setWithdrawAddress("")
-      setWithdrawAmount("")
-      await loadBalances()
-
-    } catch (error: any) {
-      console.error("Withdraw error:", error)
-      toast.error(error.message || "Failed to withdraw")
-    } finally {
-      setIsWithdrawing(false)
     }
-  }
 
-  const handleMaxAmount = (type: 'send' | 'withdraw') => {
-    const balance = (type === 'send' ? sendToken : withdrawToken) === "USDC"
-      ? usdcBalance
-      : ethBalance
-
-    if (type === 'send') {
-      setSendAmount(balance)
-    } else {
-      setWithdrawAmount(balance)
+    // Load fulfillments if missing
+    if (!orderFulfillments[order.id]) {
+      setLoadingFulfillments(order.id)
+      try {
+        const response = await fetch(`/api/payment/fulfillments?orderId=${order.id}`)
+        if (response.ok) {
+          const data = await response.json()
+          setOrderFulfillments(prev => ({ ...prev, [order.id]: data.fulfillments || [] }))
+        }
+      } catch (error) {
+        console.error("Error loading fulfillments:", error)
+      } finally {
+        setLoadingFulfillments(null)
+      }
     }
   }
 
@@ -288,6 +169,7 @@ export default function Payments() {
   }
 
   if (!hasAgent) {
+    // Rely on Dashboard to show empty state usually, but handle it here too
     return (
       <DashboardLayout>
         <div className="max-w-lg mx-auto text-center py-16">
@@ -296,7 +178,7 @@ export default function Payments() {
           </div>
           <h2 className="text-2xl font-bold mb-2">No Agent Wallet</h2>
           <p className="text-muted-foreground mb-6">
-            Create an agent wallet first to send and receive payments.
+            Create an agent wallet first to manage payments.
           </p>
           <Button asChild>
             <Link to="/create-agent">Create Agent Wallet</Link>
@@ -308,10 +190,10 @@ export default function Payments() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-3xl mx-auto pb-12">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold tracking-tight">Payments</h1>
-          <p className="text-muted-foreground mt-2">Send, receive, and withdraw funds from your agent wallet.</p>
+          <h1 className="text-3xl font-bold tracking-tight">Payment Orders</h1>
+          <p className="text-muted-foreground mt-2">Manage your payment requests and track incoming funds.</p>
         </div>
 
         {/* Balance Display */}
@@ -343,7 +225,7 @@ export default function Payments() {
         </Card>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="grid grid-cols-2 gap-4 mb-8">
           <Button variant="outline" className="h-20 flex flex-col gap-2 bg-transparent" asChild>
             <Link to="/qr-generator">
               <QrCode className="h-6 w-6" />
@@ -358,234 +240,128 @@ export default function Payments() {
           </Button>
         </div>
 
-        {/* Last Transaction */}
-        {lastTxHash && (
-          <Card className="mb-6 border-green-500/20 bg-green-500/5">
-            <CardContent className="pt-4 pb-4">
-              <div className="flex items-center gap-3">
-                <CheckCircle2 className="h-5 w-5 text-green-500" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-green-600">Transaction Successful</p>
-                  <p className="text-xs text-muted-foreground truncate font-mono">{lastTxHash}</p>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="ghost" size="sm" onClick={() => copyToClipboard(lastTxHash)}>
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="sm" asChild>
-                    <a href={`https://arbiscan.io/tx/${lastTxHash}`} target="_blank" rel="noopener noreferrer">
-                      <ExternalLink className="h-4 w-4" />
-                    </a>
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        {/* Orders List */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">Payment History</h2>
+            <Button variant="ghost" size="sm" onClick={loadOrders} disabled={loadingOrders}>
+              {loadingOrders ? <Loader2 className="h-4 w-4 animate-spin" /> : <History className="h-4 w-4" />}
+            </Button>
+          </div>
 
-        {/* Main Actions */}
-        <Tabs defaultValue="send" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="send" className="gap-2">
-              <Send className="h-4 w-4" /> Send
-            </TabsTrigger>
-            <TabsTrigger value="withdraw" className="gap-2">
-              <ArrowDownToLine className="h-4 w-4" /> Withdraw
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Send Tab */}
-          <TabsContent value="send">
-            <Card>
-              <CardHeader>
-                <CardTitle>Send Payment</CardTitle>
-                <CardDescription>Transfer funds to another wallet address</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="recipient">Recipient Address</Label>
-                  <Input
-                    id="recipient"
-                    placeholder="0x..."
-                    value={recipient}
-                    onChange={(e) => setRecipient(e.target.value)}
-                    className="font-mono"
-                  />
+          {orders.length === 0 ? (
+            <Card className="bg-muted/30 border-dashed">
+              <CardContent className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
+                  <History className="h-6 w-6 opacity-50" />
                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <Label htmlFor="sendAmount">Amount</Label>
-                      <button
-                        type="button"
-                        className="text-xs text-primary hover:underline"
-                        onClick={() => handleMaxAmount('send')}
-                      >
-                        Max
-                      </button>
-                    </div>
-                    <Input
-                      id="sendAmount"
-                      type="number"
-                      placeholder="0.00"
-                      step="0.01"
-                      min="0"
-                      value={sendAmount}
-                      onChange={(e) => setSendAmount(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Token</Label>
-                    <Select
-                      value={sendToken}
-                      onValueChange={(v) => setSendToken(v as TokenSymbol)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="USDC">USDC (${usdcBalance})</SelectItem>
-                        <SelectItem value="ETH" disabled>ETH ({ethBalance})</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="bg-muted/50 rounded-lg p-3 text-sm">
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>Network</span>
-                    <span className="font-medium text-foreground">Arbitrum One</span>
-                  </div>
-                  <div className="flex justify-between text-muted-foreground mt-1">
-                    <span>Gas</span>
-                    <span className="font-medium text-green-500">Sponsored ✓</span>
-                  </div>
-                </div>
-              </CardContent>
-              <CardFooter>
-                <Button
-                  className="w-full"
-                  onClick={handleSend}
-                  disabled={isSending || !recipient || !sendAmount}
-                >
-                  {isSending ? (
-                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Sending...</>
-                  ) : (
-                    <><Send className="mr-2 h-4 w-4" /> Send Payment</>
-                  )}
+                <p className="font-medium">No payment orders yet</p>
+                <p className="text-sm mt-1">Generate a QR code to create a payment request.</p>
+                <Button variant="link" asChild className="mt-2">
+                  <Link to="/qr-generator">Create Payment Request</Link>
                 </Button>
-              </CardFooter>
-            </Card>
-          </TabsContent>
-
-          {/* Withdraw Tab */}
-          <TabsContent value="withdraw">
-            <Card>
-              <CardHeader>
-                <CardTitle>Withdraw Funds</CardTitle>
-                <CardDescription>Transfer funds from your agent wallet to an external wallet</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="withdrawAddress">Destination Address</Label>
-                  <Input
-                    id="withdrawAddress"
-                    placeholder="0x..."
-                    value={withdrawAddress}
-                    onChange={(e) => setWithdrawAddress(e.target.value)}
-                    className="font-mono"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Enter the wallet address where you want to receive the funds
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <Label htmlFor="withdrawAmount">Amount</Label>
-                      <button
-                        type="button"
-                        className="text-xs text-primary hover:underline"
-                        onClick={() => handleMaxAmount('withdraw')}
-                      >
-                        Max
-                      </button>
-                    </div>
-                    <Input
-                      id="withdrawAmount"
-                      type="number"
-                      placeholder="0.00"
-                      step="0.01"
-                      min="0"
-                      value={withdrawAmount}
-                      onChange={(e) => setWithdrawAmount(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Token</Label>
-                    <Select
-                      value={withdrawToken}
-                      onValueChange={(v) => setWithdrawToken(v as TokenSymbol)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="USDC">USDC (${usdcBalance})</SelectItem>
-                        <SelectItem value="ETH" disabled>ETH ({ethBalance})</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
-                  <div className="flex gap-2">
-                    <AlertCircle className="h-4 w-4 text-yellow-500 flex-shrink-0 mt-0.5" />
-                    <div className="text-sm">
-                      <p className="font-medium text-yellow-600">Confirm before withdrawing</p>
-                      <p className="text-muted-foreground text-xs mt-1">
-                        Make sure the destination address is correct. Transactions cannot be reversed.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-muted/50 rounded-lg p-3 text-sm">
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>Available</span>
-                    <span className="font-medium text-foreground">
-                      {withdrawToken === "USDC" ? `$${usdcBalance}` : `${ethBalance} ETH`}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-muted-foreground mt-1">
-                    <span>Network</span>
-                    <span className="font-medium text-foreground">Arbitrum One</span>
-                  </div>
-                  <div className="flex justify-between text-muted-foreground mt-1">
-                    <span>Gas</span>
-                    <span className="font-medium text-green-500">Sponsored ✓</span>
-                  </div>
-                </div>
               </CardContent>
-              <CardFooter>
-                <Button
-                  className="w-full"
-                  variant="default"
-                  onClick={handleWithdraw}
-                  disabled={isWithdrawing || !withdrawAddress || !withdrawAmount}
-                >
-                  {isWithdrawing ? (
-                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Withdrawing...</>
-                  ) : (
-                    <><ArrowDownToLine className="mr-2 h-4 w-4" /> Withdraw to Wallet</>
-                  )}
-                </Button>
-              </CardFooter>
             </Card>
-          </TabsContent>
-        </Tabs>
+          ) : (
+            orders.map(order => (
+              <Card key={order.id} className="overflow-hidden">
+                <div
+                  className="p-4 flex items-center justify-between cursor-pointer hover:bg-muted/30 transition-colors"
+                  onClick={() => toggleOrderExpand(order)}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="h-10 w-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500">
+                      {order.mode === 'fiat' ? '₦' : '$'}
+                    </div>
+                    <div>
+                      <div className="font-medium">{order.description || "Payment Request"}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {new Date(order.createdAt).toLocaleDateString()} • {new Date(order.createdAt).toLocaleTimeString()}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <div className="font-bold">
+                        {order.mode === 'fiat' ? '₦' : ''}{order.amount} {order.mode === 'crypto' ? order.token : ''}
+                      </div>
+                      <Badge variant={order.fulfillmentCount > 0 ? "default" : "secondary"} className="text-[10px]">
+                        {order.fulfillmentCount} Paid
+                      </Badge>
+                    </div>
+                    {expandedOrderId === order.id ? (
+                      <ChevronUp className="h-5 w-5 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                    )}
+                  </div>
+                </div>
+
+                {expandedOrderId === order.id && (
+                  <div className="border-t bg-muted/10 p-4 animate-in slide-in-from-top-2 duration-200">
+                    <div className="flex flex-col md:flex-row gap-6">
+                      {/* QR Code Section */}
+                      <div className="flex flex-col items-center space-y-2 min-w-[180px]">
+                        {orderQrCodes[order.id] ? (
+                          <img src={orderQrCodes[order.id]} alt="Payment QR" className="w-32 h-32 rounded-lg border bg-white p-1" />
+                        ) : (
+                          <div className="w-32 h-32 rounded-lg border bg-muted flex items-center justify-center">
+                            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                          </div>
+                        )}
+                        <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={(e) => {
+                          e.stopPropagation()
+                          copyToClipboard(order.x402Uri)
+                        }}>
+                          <Copy className="h-3 w-3 mr-1" /> Copy URI
+                        </Button>
+                      </div>
+
+                      {/* Fulfillments List */}
+                      <div className="flex-1 space-y-3">
+                        <h4 className="text-sm font-medium text-muted-foreground">Recent Payments</h4>
+
+                        {loadingFulfillments === order.id ? (
+                          <div className="flex justify-center py-4">
+                            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : orderFulfillments[order.id]?.length > 0 ? (
+                          <div className="space-y-2">
+                            {orderFulfillments[order.id].map(f => (
+                              <div key={f.id} className="bg-background border rounded-md p-3 text-sm flex justify-between items-center">
+                                <div>
+                                  <div className="font-medium">{f.payerName || "Anonymous"}</div>
+                                  <div className="text-xs text-muted-foreground">{f.payerEmail || "No email"}</div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="font-medium text-green-600">+{f.amount}</div>
+                                  <a
+                                    href={`https://arbiscan.io/tx/${f.transactionHash}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[10px] text-muted-foreground hover:underline flex items-center justify-end gap-1"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    View Tx <ExternalLink className="h-3 w-3" />
+                                  </a>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-muted-foreground py-2 italic">
+                            No payments received yet.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            ))
+          )}
+        </div>
       </div>
     </DashboardLayout>
   )

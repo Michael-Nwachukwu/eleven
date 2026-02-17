@@ -1,6 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { getDecryptedPrivateKey, getAgentByUserId, createPayment, updatePaymentStatus } from '../../src/lib/db'
-import { executePayment } from '../../src/services/payment-service'
 import type { X402PaymentRequest } from '../../src/lib/x402'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -18,6 +16,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     try {
+        // Dynamic imports to avoid ESM/CJS cycle on Node v24
+        const { getDecryptedPrivateKey, getAgentByUserId, createPayment, updatePaymentStatus } = await import('../../src/lib/db')
+        const { executePayment } = await import('../../src/services/payment-service')
+
         const { userId, paymentRequest } = req.body as {
             userId: string
             paymentRequest: X402PaymentRequest

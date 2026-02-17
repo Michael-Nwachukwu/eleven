@@ -3,6 +3,8 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { AlertCircle, CheckCircle2, Loader2, ExternalLink, Building2, Wallet, Shield, Zap } from "lucide-react"
 import { useParams, useNavigate } from "react-router-dom"
 import { useState, useEffect } from "react"
@@ -32,6 +34,9 @@ export default function PayPage() {
     const [progress, setProgress] = useState(0)
     const [decodeError, setDecodeError] = useState('')
     const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(null)
+    const [payerName, setPayerName] = useState('')
+    const [payerEmail, setPayerEmail] = useState('')
+    const [isRecording, setIsRecording] = useState(false)
 
     // Detect payment mode
     const isFiatPayment = paymentRequest?.metadata?.mode === 'fiat' || paymentRequest?.metadata?.provider === 'aeon'
@@ -98,6 +103,11 @@ export default function PayPage() {
 
             if (result.success) {
                 if (result.transactionHash) setTransactionHash(result.transactionHash)
+                setProgress(90)
+
+                // Record fulfillment
+                await recordFulfillment(result.transactionHash || '', 'external', result.amount || '0')
+
                 setProgress(100)
                 setStage('complete')
                 toast.success("Payment successful!")
@@ -137,6 +147,11 @@ export default function PayPage() {
 
             if (result.success) {
                 if (result.transactionHash) setTransactionHash(result.transactionHash)
+                setProgress(90)
+
+                // Record fulfillment
+                await recordFulfillment(result.transactionHash || '', 'agent', result.amount || '0')
+
                 setProgress(100)
                 setStage('complete')
                 toast.success("Payment successful!")
@@ -148,6 +163,34 @@ export default function PayPage() {
             setStage('failed')
             setErrorMessage(error.message || "Payment failed. Please try again.")
             toast.error("Payment failed")
+        }
+    }
+
+    const recordFulfillment = async (txHash: string, method: string, amountPaid: string) => {
+        if (!paymentRequest?.metadata?.oid) return
+
+        setIsRecording(true)
+        try {
+            await fetch('/api/payment/fulfillments', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    orderId: paymentRequest.metadata.oid,
+                    fulfillment: {
+                        payerName,
+                        payerEmail,
+                        amount: amountPaid,
+                        fee: '0', // TODO: Calculate actual fee
+                        transactionHash: txHash,
+                        paymentMethod: method
+                    }
+                })
+            })
+        } catch (err) {
+            console.error("Error recording fulfillment:", err)
+            // Don't fail the payment flow for this, just log it
+        } finally {
+            setIsRecording(false)
         }
     }
 
@@ -324,6 +367,24 @@ export default function PayPage() {
                         {/* Review → Choose Payment Method */}
                         {stage === 'review' && (
                             <>
+                                <div className="space-y-3 mb-4">
+                                    <Label className="text-sm font-medium">Your Details (Optional)</Label>
+                                    <div className="grid gap-2">
+                                        <Input
+                                            placeholder="Your Name"
+                                            value={payerName}
+                                            onChange={(e) => setPayerName(e.target.value)}
+                                            className="bg-background"
+                                        />
+                                        <Input
+                                            type="email"
+                                            placeholder="Email Address"
+                                            value={payerEmail}
+                                            onChange={(e) => setPayerEmail(e.target.value)}
+                                            className="bg-background"
+                                        />
+                                    </div>
+                                </div>
                                 {/* Payment Method Selection for Crypto */}
                                 {isCryptoPayment && !paymentMethod && (
                                     <div className="w-full space-y-3">
@@ -474,6 +535,7 @@ export default function PayPage() {
                             <div className="w-full text-center space-y-3">
                                 <CheckCircle2 className="h-10 w-10 text-green-500 mx-auto" />
                                 <p className="text-lg font-bold text-green-600">Payment Complete!</p>
+                                <p className="text-sm text-muted-foreground">Thank you for your payment.</p>
                                 {explorerUrl && (
                                     <a href={explorerUrl} target="_blank" rel="noreferrer">
                                         <Button variant="outline" size="sm">

@@ -4,6 +4,8 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { ArrowLeft, AlertCircle, CheckCircle2, Loader2, ExternalLink, Building2, Wallet, Zap } from "lucide-react"
 import { Link, useNavigate, useLocation } from "react-router-dom"
 import { useState, useEffect } from "react"
@@ -31,6 +33,9 @@ export default function PaymentReview() {
   const [errorMessage, setErrorMessage] = useState<string>('')
   const [progress, setProgress] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(null)
+  const [payerName, setPayerName] = useState('')
+  const [payerEmail, setPayerEmail] = useState('')
+  const [isRecording, setIsRecording] = useState(false)
 
   // External wallet
   const externalWallet = wallets.find(w => w.walletClientType !== 'privy')
@@ -99,6 +104,11 @@ export default function PaymentReview() {
         if (result.transactionHash) {
           setTransactionHash(result.transactionHash)
         }
+        setProgress(90)
+
+        // Record fulfillment
+        await recordFulfillment(result.transactionHash || '', 'agent', result.amount || '0')
+
         setProgress(100)
         setStage('complete')
         toast.success("Payment successful!")
@@ -157,6 +167,11 @@ export default function PaymentReview() {
 
       if (result.success) {
         if (result.transactionHash) setTransactionHash(result.transactionHash)
+        setProgress(90)
+
+        // Record fulfillment
+        await recordFulfillment(result.transactionHash || '', 'external', result.amount || '0')
+
         setProgress(100)
         setStage('complete')
         toast.success("Payment successful!")
@@ -178,6 +193,34 @@ export default function PaymentReview() {
       setStage('failed')
       setErrorMessage(error.message || "Payment failed. Please try again.")
       toast.error("Payment failed")
+    }
+  }
+
+  const recordFulfillment = async (txHash: string, method: string, amountPaid: string) => {
+    if (!paymentRequest?.metadata?.oid) return
+
+    setIsRecording(true)
+    try {
+      await fetch('/api/payment/fulfillments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: paymentRequest.metadata.oid,
+          fulfillment: {
+            payerName,
+            payerEmail,
+            amount: amountPaid,
+            fee: '0', // TODO: Calculate actual fee
+            transactionHash: txHash,
+            paymentMethod: method
+          }
+        })
+      })
+    } catch (err) {
+      console.error("Error recording fulfillment:", err)
+      // Don't fail the payment flow for this, just log it
+    } finally {
+      setIsRecording(false)
     }
   }
 
@@ -545,6 +588,25 @@ export default function PaymentReview() {
           <CardFooter className="flex flex-col gap-4 border-t pt-6">
             {stage === 'review' && (
               <>
+                <div className="space-y-3 mb-4">
+                  <Label className="text-sm font-medium">Your Details (Optional)</Label>
+                  <div className="grid gap-2">
+                    <Input
+                      placeholder="Your Name"
+                      value={payerName}
+                      onChange={(e) => setPayerName(e.target.value)}
+                      className="bg-background"
+                    />
+                    <Input
+                      type="email"
+                      placeholder="Email Address"
+                      value={payerEmail}
+                      onChange={(e) => setPayerEmail(e.target.value)}
+                      className="bg-background"
+                    />
+                  </div>
+                </div>
+
                 {/* Crypto: payment method selection */}
                 {!isFiatPayment && !paymentMethod && (
                   <div className="w-full space-y-3">

@@ -15,11 +15,13 @@ import QRCode from "qrcode"
 import { encodeX402Payment, getTokenAddress, NETWORKS, type X402PaymentRequest } from "@/lib/x402"
 import { useAgentWallet } from "@/hooks/useAgentWallet"
 import { useAeonBanks } from "@/hooks/useAeonBanks"
+import { usePrivy } from "@privy-io/react-auth"
 
 type TokenSymbol = "USDC" | "DAI" | "ETH"
 type NetworkKey = keyof typeof NETWORKS
 
 export default function QrGenerator() {
+  const { user } = usePrivy()
   const navigate = useNavigate()
   const { agent, loading: agentLoading } = useAgentWallet()
 
@@ -135,6 +137,62 @@ export default function QrGenerator() {
       return
     }
 
+    // Create Payment Order in DB first
+    const orderData = {
+      amount,
+      token: paymentMode === 'crypto' ? token : fiatCurrency, // Use Fiat currency for fiat mode
+      currency: paymentMode === 'crypto' ? 'USD' : fiatCurrency, // Approximate
+      mode: paymentMode,
+      description: description || (paymentMode === 'crypto' ? `Payment request` : `Bank Transfer`),
+      status: 'active',
+      payTo: agentAddress,
+      x402Uri: '', // Will update later or just leave empty in DB for now, or generated client side?
+      // Actually, we generate URI *after* allow DB to have ID?
+      // Circular dependency if we want URI in DB.
+      // Solution: Create order with empty URI -> Get ID -> Generate URI -> Update order with URI (optional)
+      // For now, just create order to get ID. We can skip saving URI in DB or update it later if needed.
+      // The DB schema has x402Uri. Let's create it with placeholder or just '' then we might not need it in DB if we have all fields.
+      // But strictly, we should probably update it.
+      // Let's just create order, get ID, generate URI, then maybe update order?
+      // Or just leave URI empty in DB for now to save a round trip. Usage in history is mainly for display.
+      // IMPORTANT: We need the ID in the URI.
+    }
+
+    // We actually need to encode the URI *with* the ID.
+    // So: 
+    // 1. Create order (POST /api/payment/orders)
+    // 2. Get ID
+    // 3. Generate URI with ID in metadata
+    // 4. (Optional) Update order with encoded URI? (We didn't make an update endpoint yet, only create/get).
+    // We can pass the "intended" URI structure to DB? No, we need ID first.
+    // Let's just create order, and locally generate URI. The DB record will have empty x402Uri for now
+    // unless we add an update endpoint.
+    // Actually, `x402Uri` in DB `PaymentOrder` type is good to have.
+    // I'll skip updating it for now to avoid complexity, or just store a placeholder.
+
+    let newOrderId = ""
+
+    try {
+      const res = await fetch('/api/payment/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user?.id,
+          order: { ...orderData, x402Uri: '' }
+        })
+      })
+
+      if (res.ok) {
+        const newOrder = await res.json()
+        newOrderId = newOrder.id
+        console.log("Created order:", newOrderId)
+      } else {
+        console.error("Failed to create order persistence")
+      }
+    } catch (err) {
+      console.error("Error creating order:", err)
+    }
+
     try {
       let paymentRequest: X402PaymentRequest
       let generatedNQRCode = ""
@@ -160,7 +218,8 @@ export default function QrGenerator() {
             timestamp: Date.now(),
             seller: agentAddress,
             token: token,
-            mode: 'crypto'
+            mode: 'crypto',
+            oid: newOrderId // Embed Order ID
           }
         }
       } else {
@@ -211,6 +270,7 @@ export default function QrGenerator() {
             bankName: selectedBankData.bankName,
             accountNumber: accountNumber,
             accountName: finalAccountName,
+            oid: newOrderId // Embed Order ID
           }
         }
       }
@@ -240,6 +300,9 @@ export default function QrGenerator() {
       setQrCodeDataUrl(qrDataUrl)
       setGenerated(true)
       toast.success("QR code generated successfully!")
+
+      // Update the local state or UI to reflect saved order? 
+      // The user can go to /payments (Orders) to see it.
 
     } catch (error) {
       console.error("Error generating QR code:", error)

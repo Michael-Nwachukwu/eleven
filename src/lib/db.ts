@@ -25,6 +25,35 @@ export interface Payment {
     createdAt: string
 }
 
+export interface PaymentOrder {
+    id: string
+    userId: string
+    createdAt: string
+    amount: string
+    token: string
+    currency: string
+    mode: 'crypto' | 'fiat'
+    description: string
+    status: 'active' | 'completed' | 'cancelled'
+    payTo: string
+    x402Uri: string
+    totalCollected: string
+    fulfillmentCount: number
+    metadata?: Record<string, any>
+}
+
+export interface PaymentFulfillment {
+    id: string
+    orderId: string
+    payerName: string
+    payerEmail: string
+    amount: string
+    fee: string
+    transactionHash: string
+    paidAt: string
+    paymentMethod: 'external' | 'agent' | 'aeon'
+}
+
 // Redis client singleton
 let redisClient: ReturnType<typeof createClient> | null = null
 
@@ -144,7 +173,7 @@ export async function getDecryptedPrivateKey(userId: string): Promise<string | n
     return decryptPrivateKey(agent.encryptedPrivateKey)
 }
 
-// Payment History Operations
+// Payment History Operations (Legacy / Agent-centric)
 export async function createPayment(
     agentWalletId: string,
     paymentType: 'crypto' | 'fiat',
@@ -216,4 +245,98 @@ export async function getPaymentById(paymentId: string): Promise<Payment | null>
     if (!paymentData) return null
 
     return JSON.parse(paymentData)
+}
+
+// Payment Orders Operations (User-centric)
+export async function createPaymentOrder(
+    userId: string,
+    order: Omit<PaymentOrder, 'id' | 'createdAt' | 'totalCollected' | 'fulfillmentCount'>
+): Promise<PaymentOrder> {
+    const redis = await getRedisClient()
+    const id = crypto.randomUUID()
+    const now = new Date().toISOString()
+
+    const newOrder: PaymentOrder = {
+        ...order,
+        id,
+        userId,
+        createdAt: now,
+        totalCollected: '0',
+        fulfillmentCount: 0
+    }
+
+    await redis.set(`order:${id}`, JSON.stringify(newOrder))
+    await redis.lPush(`orders:user:${userId}`, id)
+
+    return newOrder
+}
+
+export async function getPaymentOrdersByUser(userId: string, limit = 50): Promise<PaymentOrder[]> {
+    const redis = await getRedisClient()
+    const orderIds = await redis.lRange(`orders:user:${userId}`, 0, limit - 1)
+    if (!orderIds || orderIds.length === 0) return []
+
+    const orders = await Promise.all(
+        orderIds.map(async (id) => {
+            const data = await redis.get(`order:${id}`)
+            return data ? JSON.parse(data) : null
+        })
+    )
+
+    return orders.filter((o): o is PaymentOrder => o !== null)
+}
+
+export async function getPaymentOrderById(id: string): Promise<PaymentOrder | null> {
+    const redis = await getRedisClient()
+    const data = await redis.get(`order:${id}`)
+    return data ? JSON.parse(data) : null
+}
+
+export async function addFulfillment(
+    orderId: string,
+    fulfillment: Omit<PaymentFulfillment, 'id' | 'orderId' | 'paidAt'>
+): Promise<PaymentFulfillment> {
+    const redis = await getRedisClient()
+    const id = crypto.randomUUID()
+    const now = new Date().toISOString()
+
+    const newFulfillment: PaymentFulfillment = {
+        ...fulfillment,
+        id,
+        orderId,
+        paidAt: now
+    }
+
+    // Store fulfillment
+    await redis.set(`fulfillment:${id}`, JSON.stringify(newFulfillment))
+    await redis.lPush(`fulfillments:order:${orderId}`, id)
+
+    // Update order totals
+    const order = await getPaymentOrderById(orderId)
+    if (order) {
+        const currentTotal = parseFloat(order.totalCollected)
+        const newAmount = parseFloat(fulfillment.amount)
+        order.totalCollected = (currentTotal + newAmount).toString()
+        order.fulfillmentCount += 1
+
+        // If fully collected (or just updated), preserve storage
+        await redis.set(`order:${orderId}`, JSON.stringify(order))
+    }
+
+    return newFulfillment
+}
+
+export async function getOrderFulfillments(orderId: string): Promise<PaymentFulfillment[]> {
+    const redis = await getRedisClient()
+    const ids = await redis.lRange(`fulfillments:order:${orderId}`, 0, -1)
+    if (!ids || ids.length === 0) return []
+
+    const fulfillments = await Promise.all(
+        ids.map(async (id) => {
+            const data = await redis.get(`fulfillment:${id}`)
+            return data ? JSON.parse(data) : null
+        })
+    )
+
+    return fulfillments.filter((f): f is PaymentFulfillment => f !== null)
 }

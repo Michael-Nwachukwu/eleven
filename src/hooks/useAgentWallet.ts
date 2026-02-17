@@ -10,8 +10,8 @@ export interface AgentWallet {
     isActive: boolean
 }
 
-// Check if we're in development mode without API routes (npm run dev)
-const USE_LOCALSTORAGE = import.meta.env.DEV
+// Force API usage (Vercel KV) even in dev mode to ensure consistency
+const USE_LOCALSTORAGE = false // import.meta.env.DEV
 
 export function useAgentWallet() {
     const { user } = usePrivy()
@@ -102,6 +102,14 @@ export function useAgentWallet() {
                 }
 
                 const data = await response.json()
+
+                // Store private key locally for signing transactions
+                if (data.privateKey) {
+                    localStorage.setItem(`agent_pk_${user.id}`, data.privateKey)
+                    // Remove from state object security
+                    delete data.privateKey
+                }
+
                 setAgent(data)
                 return data
             }

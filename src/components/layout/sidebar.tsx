@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { LayoutDashboard, PlusCircle, CreditCard, QrCode, Settings, TrendingUp, Wallet } from "lucide-react"
 
-interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {}
+interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> { }
 
 export function Sidebar({ className }: SidebarProps) {
   const location = useLocation()
@@ -30,7 +30,7 @@ export function Sidebar({ className }: SidebarProps) {
       active: pathname === "/fund-agent",
     },
     {
-      label: "Payments",
+      label: "Orders",
       icon: CreditCard,
       href: "/payments",
       active: pathname === "/payments" || pathname === "/payment-review" || pathname === "/payment-success",

@@ -1,5 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { getAgentByUserId } from '../../src/lib/db'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     // CORS headers
@@ -16,6 +15,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     try {
+        // Dynamic import to avoid ESM/CJS cycle on Node v24
+        const { getAgentByUserId } = await import('../../src/lib/db')
+
         const { userId } = req.query
 
         if (!userId || typeof userId !== 'string') {

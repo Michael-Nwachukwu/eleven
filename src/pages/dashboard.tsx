@@ -1,22 +1,20 @@
 "use client"
 
+import { SendModal } from "@/components/send-modal"
+
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { usePrivy } from "@privy-io/react-auth"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { AgentCard } from "@/components/ui/agent-card"
-import { EmptyState } from "@/components/ui/empty-state"
-import { Bot, ArrowUpRight, QrCode, Wallet, TrendingUp, Settings, Copy, ExternalLink, Loader2 } from "lucide-react"
+import { Loader2, Copy, ExternalLink, Wallet, Coins, QrCode, ArrowUpRight, Plus, Bot, History, CreditCard } from "lucide-react"
 import { Link, useNavigate, Navigate } from "react-router-dom"
 import { useState, useEffect } from "react"
-import { useAgentWallet } from "@/hooks/useAgentWallet"
 import { toast } from "sonner"
-import { readContract } from "thirdweb"
-import { thirdwebClient } from "@/services/thirdweb-agent-service"
+import { useAgentWallet } from "@/hooks/useAgentWallet"
+import { usePrivy } from "@privy-io/react-auth"
+import { getContract, readContract, resolveMethod } from "thirdweb"
 import { arbitrum } from "thirdweb/chains"
-
-// USDC contract on Arbitrum
-const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+import { thirdwebClient } from "@/services/thirdweb-agent-service"
+import { formatUnits } from "viem"
 
 export default function Dashboard() {
   const { user, authenticated, ready } = usePrivy()
@@ -26,31 +24,20 @@ export default function Dashboard() {
   const [usdcBalance, setUsdcBalance] = useState<string>("0")
   const [ethBalance, setEthBalance] = useState<string>("0")
   const [loadingBalances, setLoadingBalances] = useState(false)
+  const [showSendModal, setShowSendModal] = useState(false)
 
-  // Fetch balances when agent is loaded
+  // USDC contract on Arbitrum One
+  const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
+
   useEffect(() => {
-    async function fetchBalances() {
-      if (!agent?.agentAddress) return
+    if (!agent?.agentAddress) return
 
+    const fetchBalances = async () => {
       setLoadingBalances(true)
       try {
-        // Fetch USDC balance
-        const usdcBalanceRaw = await readContract({
-          contract: {
-            client: thirdwebClient,
-            chain: arbitrum,
-            address: USDC_ADDRESS,
-          },
-          method: "function balanceOf(address) view returns (uint256)",
-          params: [agent.agentAddress as `0x${string}`],
-        })
-
-        // USDC has 6 decimals
-        const usdcFormatted = (Number(usdcBalanceRaw) / 1e6).toFixed(2)
-        setUsdcBalance(usdcFormatted)
-
-        // Fetch ETH balance
-        const response = await fetch(
+        // 1. Fetch ETH Balance (Native)
+        // Using direct RPC for simplicity as per fund-agent pattern
+        const ethResponse = await fetch(
           `https://arb1.arbitrum.io/rpc`,
           {
             method: 'POST',
@@ -63,18 +50,39 @@ export default function Dashboard() {
             }),
           }
         )
-        const data = await response.json()
-        const ethWei = BigInt(data.result || '0')
-        const ethFormatted = (Number(ethWei) / 1e18).toFixed(4)
-        setEthBalance(ethFormatted)
+        const ethData = await ethResponse.json()
+        const ethWei = BigInt(ethData.result || '0')
+        // Format ETH (18 decimals) - show 4 decimal places
+        const ethFormatted = formatUnits(ethWei, 18)
+        setEthBalance(parseFloat(ethFormatted).toFixed(4))
+
+        // 2. Fetch USDC Balance (ERC20)
+        const usdcContract = getContract({
+          client: thirdwebClient,
+          address: USDC_ADDRESS,
+          chain: arbitrum,
+        })
+
+        const usdcBalanceWei = await readContract({
+          contract: usdcContract,
+          method: "function balanceOf(address) view returns (uint256)",
+          params: [agent.agentAddress]
+        }) as bigint
+
+        // Format USDC (6 decimals) - show 2 decimal places
+        const usdcFormatted = formatUnits(usdcBalanceWei, 6)
+        setUsdcBalance(parseFloat(usdcFormatted).toFixed(2))
+
       } catch (error) {
-        console.error('Error fetching balances:', error)
+        console.error("Error fetching balances:", error)
       } finally {
         setLoadingBalances(false)
       }
     }
 
     fetchBalances()
+    const interval = setInterval(fetchBalances, 15000) // Poll every 15s
+    return () => clearInterval(interval)
   }, [agent?.agentAddress])
 
   // Copy address to clipboard
@@ -227,10 +235,12 @@ export default function Dashboard() {
                   <QrCode className="mr-2 h-4 w-4" /> Generate Payment QR
                 </Link>
               </Button>
-              <Button variant="outline" className="w-full justify-start bg-transparent" asChild>
-                <Link to="/payments">
-                  <ArrowUpRight className="mr-2 h-4 w-4" /> Send Payment
-                </Link>
+              <Button
+                variant="outline"
+                className="w-full justify-start bg-transparent"
+                onClick={() => setShowSendModal(true)}
+              >
+                <ArrowUpRight className="mr-2 h-4 w-4" /> Send Funds
               </Button>
             </CardContent>
           </Card>
@@ -261,6 +271,8 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </div>
+
+        <SendModal open={showSendModal} onOpenChange={setShowSendModal} />
       </div>
     </DashboardLayout>
   )
