@@ -367,9 +367,9 @@ export default function PayPage() {
                         {/* Review → Choose Payment Method */}
                         {stage === 'review' && (
                             <>
-                                <div className="space-y-3 mb-4">
-                                    <Label className="text-sm font-medium">Your Details (Optional)</Label>
-                                    <div className="grid gap-2">
+                                <div className="space-y-3 mb-4 w-full">
+                                    <Label className="text-sm font-medium">Your Details</Label>
+                                    <div className="grid gap-2 w-full">
                                         <Input
                                             placeholder="Your Name"
                                             value={payerName}

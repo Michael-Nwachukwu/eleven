@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { ArrowLeft, Download, Share2, Copy, CheckCircle2, Loader2, Info, AlertCircle, Building2, RefreshCw } from "lucide-react"
+import { ArrowLeft, Download, Share2, Copy, CheckCircle2, Loader2, Info, AlertCircle, Building2, RefreshCw, Eye, EyeOff } from "lucide-react"
+import { QrCodeReader } from "@/components/qr-code-reader"
 import { Link, useNavigate } from "react-router-dom"
 import { useState, useEffect } from "react"
 import { toast } from "sonner"
@@ -40,7 +41,9 @@ export default function QrGenerator() {
   const [paymentMode, setPaymentMode] = useState<'crypto' | 'fiat'>('crypto')
 
   // Fiat specific fields - Bank Details
-  const [fiatCurrency] = useState('NGN')
+  const [fiatCurrency, setFiatCurrency] = useState<'NGN' | 'VND'>('VND')
+  const [vietQRCode, setVietQRCode] = useState('')
+  const [showRawInput, setShowRawInput] = useState(false)
   const [selectedBank, setSelectedBank] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
   const [accountName, setAccountName] = useState('')
@@ -222,8 +225,38 @@ export default function QrGenerator() {
             oid: newOrderId // Embed Order ID
           }
         }
+      } else if (fiatCurrency === 'VND') {
+        // ===== VND FIAT PAYMENT (AEON x402) =====
+        if (!vietQRCode.trim()) {
+          toast.error('Please scan, upload, or enter the VietQR code')
+          setIsGenerating(false)
+          return
+        }
+
+        paymentRequest = {
+          maxAmountRequired: amount,
+          resource: 'https://ai-api-sbx.aeon.xyz/open/ai/402/payment',
+          payTo: '0x0000000000000000000000000000000000000000' as `0x${string}`,
+          asset: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' as `0x${string}`,
+          network: 'arbitrum',
+          description: description || `Payment of ₫${Number(amount).toLocaleString()} VND`,
+          metadata: {
+            itemName: description || 'VND Bank Transfer',
+            timestamp: Date.now(),
+            mode: 'fiat',
+            provider: 'aeon',
+            appId: import.meta.env.VITE_AEON_APP_ID || 'TEST000001',
+            qrCode: vietQRCode.trim(),
+            currency: 'VND',
+            originalAmount: amount,
+            bankName: 'Vietnamese Bank',
+            accountNumber: '',
+            accountName: '',
+            oid: newOrderId
+          }
+        }
       } else {
-        // ===== FIAT PAYMENT (AEON BANK TRANSFER) =====
+        // ===== NGN FIAT PAYMENT (AEON BANK TRANSFER) =====
         // Validate bank details
         if (!selectedBank) {
           toast.error("Please select a bank")
@@ -241,7 +274,6 @@ export default function QrGenerator() {
           return
         }
 
-        // Find the selected bank details
         const selectedBankData = banks.find(b => b.bankCode === selectedBank)
         if (!selectedBankData) {
           toast.error("Invalid bank selected")
@@ -253,9 +285,9 @@ export default function QrGenerator() {
 
         paymentRequest = {
           maxAmountRequired: amount,
-          resource: 'aeon-bank-transfer', // Use bank transfer API, not x402
+          resource: 'aeon-bank-transfer',
           payTo: '0x0000000000000000000000000000000000000000' as `0x${string}`,
-          asset: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' as `0x${string}`, // USDC on Arbitrum
+          asset: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' as `0x${string}`,
           network: 'arbitrum',
           description: description || `Payment of ₦${amount} to ${finalAccountName}`,
           metadata: {
@@ -270,7 +302,7 @@ export default function QrGenerator() {
             bankName: selectedBankData.bankName,
             accountNumber: accountNumber,
             accountName: finalAccountName,
-            oid: newOrderId // Embed Order ID
+            oid: newOrderId
           }
         }
       }
@@ -518,15 +550,38 @@ export default function QrGenerator() {
                 {/* ===== FIAT/BANK MODE FIELDS ===== */}
                 {paymentMode === 'fiat' && (
                   <>
-                    {/* Amount (in NGN) */}
+                    {/* Currency Selector */}
                     <div className="space-y-2">
-                      <Label htmlFor="fiat-amount">Amount (NGN) *</Label>
+                      <Label>Currency *</Label>
+                      <Select
+                        value={fiatCurrency}
+                        onValueChange={(value) => {
+                          setFiatCurrency(value as 'NGN' | 'VND')
+                          setShowRawInput(false)
+                        }}
+                        disabled={generated}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="VND">🇻🇳 Vietnamese Dong (VND)</SelectItem>
+                          <SelectItem value="NGN">🇳🇬 Nigerian Naira (NGN)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Amount */}
+                    <div className="space-y-2">
+                      <Label htmlFor="fiat-amount">Amount ({fiatCurrency}) *</Label>
                       <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                          {fiatCurrency === 'VND' ? '₫' : '₦'}
+                        </span>
                         <Input
                           id="fiat-amount"
                           type="number"
-                          placeholder="10000"
+                          placeholder={fiatCurrency === 'VND' ? '100000' : '10000'}
                           step="1"
                           min="100"
                           value={amount}
@@ -538,105 +593,172 @@ export default function QrGenerator() {
                       </div>
                     </div>
 
-                    {/* Bank Selection */}
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center">
-                        <Label>Select Bank *</Label>
-                        {banksLoading && <Loader2 className="h-3 w-3 animate-spin" />}
-                        {banksError && (
-                          <Button variant="ghost" size="sm" onClick={refetchBanks} className="h-6 px-2">
-                            <RefreshCw className="h-3 w-3 mr-1" /> Retry
-                          </Button>
-                        )}
-                      </div>
-                      <Select
-                        value={selectedBank}
-                        onValueChange={(value) => {
-                          setSelectedBank(value)
-                          setAccountName('') // Clear when bank changes
-                          clearVerification()
-                        }}
-                        disabled={generated || banksLoading}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder={banksLoading ? "Loading banks..." : "Choose your bank"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {banks.map((bank) => (
-                            <SelectItem key={bank.bankCode} value={bank.bankCode}>
-                              {bank.bankName}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    {fiatCurrency === 'VND' ? (
+                      <>
+                        {/* QR Code Input Section */}
+                        <div className="space-y-3">
+                          <div className="flex justify-between items-center">
+                            <Label>VietQR Code *</Label>
+                            <button
+                              type="button"
+                              className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1"
+                              onClick={() => setShowRawInput(!showRawInput)}
+                            >
+                              {showRawInput ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                              {showRawInput ? 'Hide' : 'Enter'} manually
+                            </button>
+                          </div>
 
-                    {/* Account Number */}
-                    <div className="space-y-2">
-                      <Label htmlFor="accountNumber">Account Number *</Label>
-                      <Input
-                        id="accountNumber"
-                        type="text"
-                        placeholder="0123456789"
-                        maxLength={10}
-                        value={accountNumber}
-                        onChange={(e) => setAccountNumber(e.target.value.replace(/\D/g, ''))}
-                        disabled={generated}
-                        required
-                      />
-                      {accountNumber && accountNumber.length !== 10 && (
-                        <p className="text-xs text-yellow-600">Account number must be 10 digits</p>
-                      )}
-                    </div>
+                          {/* Scan / Upload */}
+                          <QrCodeReader
+                            onResult={(val) => setVietQRCode(val)}
+                            disabled={generated}
+                          />
 
-                    {/* Account Name (Auto-verified or manual input) */}
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center">
-                        <Label htmlFor="accountName">Account Name *</Label>
-                        {verificationLoading && (
-                          <span className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Loader2 className="h-3 w-3 animate-spin" /> Verifying...
-                          </span>
-                        )}
-                        {verifiedAccountName && (
-                          <span className="text-xs text-green-600 flex items-center gap-1">
-                            <CheckCircle2 className="h-3 w-3" /> Verified
-                          </span>
-                        )}
-                        {verificationError && !verifiedAccountName && (
-                          <span className="text-xs text-yellow-600 flex items-center gap-1">
-                            <AlertCircle className="h-3 w-3" /> Enter manually
-                          </span>
-                        )}
-                      </div>
-                      <Input
-                        id="accountName"
-                        type="text"
-                        placeholder={verificationLoading ? "Verifying..." : "Enter account holder name"}
-                        value={accountName}
-                        onChange={(e) => setAccountName(e.target.value.toUpperCase())}
-                        disabled={generated || verificationLoading}
-                        required
-                        className={verifiedAccountName ? "bg-green-50 border-green-200" : ""}
-                      />
-                    </div>
+                          {/* Raw input (hidden by default) */}
+                          {showRawInput && (
+                            <Textarea
+                              id="qrcode-raw"
+                              placeholder="Paste the VietQR string here (starts with 000201...)"
+                              value={vietQRCode}
+                              onChange={(e) => setVietQRCode(e.target.value.trim())}
+                              disabled={generated}
+                              rows={3}
+                              className="font-mono text-xs"
+                            />
+                          )}
 
-                    {/* Removed City field - not needed for Aeon bank transfer */}
-
-                    {/* Info Banner */}
-                    <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
-                      <div className="flex gap-3">
-                        <Building2 className="h-5 w-5 text-blue-500 flex-shrink-0" />
-                        <div className="text-sm space-y-1">
-                          <p className="font-medium text-blue-600">Nigerian Bank Transfer</p>
-                          <ul className="text-muted-foreground text-xs space-y-0.5">
-                            <li>• Customer pays in crypto (USDC)</li>
-                            <li>• Aeon converts to Naira (₦)</li>
-                            <li>• You receive ₦{amount || '0'} in your bank</li>
-                          </ul>
+                          {/* Sample QR code helper */}
+                          <p className="text-xs text-muted-foreground">
+                            Don't have one? <button
+                              type="button"
+                              className="underline text-primary hover:text-primary/80"
+                              onClick={() => {
+                                setVietQRCode('00020101021138560010A0000007270126000697041501121170028740400208QRIBFTTA53037045802VN63048A1C')
+                                toast.success('Sample VietQR code loaded')
+                              }}
+                            >
+                              Use test VietQR code
+                            </button>
+                          </p>
                         </div>
-                      </div>
-                    </div>
+
+                        {/* Info Banner */}
+                        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
+                          <div className="flex gap-3">
+                            <Building2 className="h-5 w-5 text-blue-500 flex-shrink-0" />
+                            <div className="text-sm space-y-1">
+                              <p className="font-medium text-blue-600">Vietnamese Bank Transfer</p>
+                              <ul className="text-muted-foreground text-xs space-y-0.5">
+                                <li>• Customer pays in crypto (USDC)</li>
+                                <li>• Aeon converts to VND (₫)</li>
+                                <li>• Recipient receives ₫{Number(amount || 0).toLocaleString()} in their bank</li>
+                              </ul>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        {/* Bank Selection */}
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <Label>Select Bank *</Label>
+                            {banksLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+                            {banksError && (
+                              <Button variant="ghost" size="sm" onClick={refetchBanks} className="h-6 px-2">
+                                <RefreshCw className="h-3 w-3 mr-1" /> Retry
+                              </Button>
+                            )}
+                          </div>
+                          <Select
+                            value={selectedBank}
+                            onValueChange={(value) => {
+                              setSelectedBank(value)
+                              setAccountName('')
+                              clearVerification()
+                            }}
+                            disabled={generated || banksLoading}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder={banksLoading ? "Loading banks..." : "Choose your bank"} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {banks.map((bank) => (
+                                <SelectItem key={bank.bankCode} value={bank.bankCode}>
+                                  {bank.bankName}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* Account Number */}
+                        <div className="space-y-2">
+                          <Label htmlFor="accountNumber">Account Number *</Label>
+                          <Input
+                            id="accountNumber"
+                            type="text"
+                            placeholder="0123456789"
+                            maxLength={10}
+                            value={accountNumber}
+                            onChange={(e) => setAccountNumber(e.target.value.replace(/\D/g, ''))}
+                            disabled={generated}
+                            required
+                          />
+                          {accountNumber && accountNumber.length !== 10 && (
+                            <p className="text-xs text-yellow-600">Account number must be 10 digits</p>
+                          )}
+                        </div>
+
+                        {/* Account Name */}
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <Label htmlFor="accountName">Account Name *</Label>
+                            {verificationLoading && (
+                              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                <Loader2 className="h-3 w-3 animate-spin" /> Verifying...
+                              </span>
+                            )}
+                            {verifiedAccountName && (
+                              <span className="text-xs text-green-600 flex items-center gap-1">
+                                <CheckCircle2 className="h-3 w-3" /> Verified
+                              </span>
+                            )}
+                            {verificationError && !verifiedAccountName && (
+                              <span className="text-xs text-yellow-600 flex items-center gap-1">
+                                <AlertCircle className="h-3 w-3" /> Enter manually
+                              </span>
+                            )}
+                          </div>
+                          <Input
+                            id="accountName"
+                            type="text"
+                            placeholder={verificationLoading ? "Verifying..." : "Enter account holder name"}
+                            value={accountName}
+                            onChange={(e) => setAccountName(e.target.value.toUpperCase())}
+                            disabled={generated || verificationLoading}
+                            required
+                            className={verifiedAccountName ? "bg-green-50 border-green-200" : ""}
+                          />
+                        </div>
+
+                        {/* NGN Info Banner */}
+                        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
+                          <div className="flex gap-3">
+                            <Building2 className="h-5 w-5 text-blue-500 flex-shrink-0" />
+                            <div className="text-sm space-y-1">
+                              <p className="font-medium text-blue-600">Nigerian Bank Transfer</p>
+                              <ul className="text-muted-foreground text-xs space-y-0.5">
+                                <li>• Customer pays in crypto (USDC)</li>
+                                <li>• Aeon converts to Naira (₦)</li>
+                                <li>• You receive ₦{amount || '0'} in your bank</li>
+                              </ul>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
 
