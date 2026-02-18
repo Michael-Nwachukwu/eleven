@@ -292,6 +292,20 @@ export async function getPaymentOrderById(id: string): Promise<PaymentOrder | nu
     return data ? JSON.parse(data) : null
 }
 
+export async function updatePaymentOrder(
+    id: string,
+    fields: Partial<Omit<PaymentOrder, 'id' | 'userId' | 'createdAt'>>
+): Promise<PaymentOrder | null> {
+    const redis = await getRedisClient()
+    const data = await redis.get(`order:${id}`)
+    if (!data) return null
+
+    const order: PaymentOrder = JSON.parse(data)
+    const updated = { ...order, ...fields }
+    await redis.set(`order:${id}`, JSON.stringify(updated))
+    return updated
+}
+
 export async function addFulfillment(
     orderId: string,
     fulfillment: Omit<PaymentFulfillment, 'id' | 'orderId' | 'paidAt'>

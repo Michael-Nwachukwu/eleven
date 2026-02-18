@@ -156,6 +156,19 @@ function decodePayload(base64: string): AeonXPaymentPayload {
   return JSON.parse(atob(base64));
 }
 
+/**
+ * Safe decode — returns parsed payload or raw string if base64 is invalid
+ */
+function safeDecodePayload(base64: string): any {
+  try {
+    return decodePayload(base64);
+  } catch {
+    console.warn('Could not decode X-Payment-Response as base64, returning raw');
+    try { return JSON.parse(base64); } catch { /* not JSON either */ }
+    return base64;
+  }
+}
+
 // =============================================================================
 // MAIN CLIENT CLASS
 // =============================================================================
@@ -324,7 +337,7 @@ class AeonX402Client {
       status: response.status,
       body,
       xPaymentResponse: xPaymentResponse
-        ? decodePayload(xPaymentResponse)
+        ? safeDecodePayload(xPaymentResponse)
         : null,
     };
   }

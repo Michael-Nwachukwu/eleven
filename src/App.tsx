@@ -9,6 +9,7 @@ import CreateAgent from "./pages/create-agent"
 import EnsSetup from "./pages/ens-setup"
 import FundAgent from "./pages/fund-agent"
 import Payments from "./pages/payments"
+import OrderDetail from "./pages/order-detail"
 import QrGenerator from "./pages/qr-generator"
 import QrScanner from "./pages/qr-scanner"
 import PaymentReview from "./pages/payment-review"
@@ -29,6 +30,7 @@ function App() {
           <Route path="/ens-setup" element={<EnsSetup />} />
           <Route path="/fund-agent" element={<FundAgent />} />
           <Route path="/payments" element={<Payments />} />
+          <Route path="/orders/:orderId" element={<OrderDetail />} />
           <Route path="/qr-generator" element={<QrGenerator />} />
           <Route path="/qr-scanner" element={<QrScanner />} />
           <Route path="/payment-review" element={<PaymentReview />} />

@@ -19,8 +19,8 @@ const PROXY_CREATE_ORDER = '/api/aeon/create-order'
 const PROXY_QUERY_ORDER = '/api/aeon/query-order'
 
 // Sandbox credentials - replace with real credentials for production
-const SANDBOX_APP_ID = 'TEST000001'
-const SANDBOX_SIGN = 'TEST000001' // In production, this should be generated signature
+// Aeon sandbox secret key (from Aeon docs signature example)
+const SANDBOX_SECRET = '9999'
 
 // =============================================================================
 // TYPES
@@ -89,6 +89,7 @@ export interface CreateOrderResponse {
         amount: string // USDC amount to pay
         orderNo: string
     }
+    merchantOrderNo?: string // Set by client for polling
 }
 
 export interface QueryOrderResponse {
@@ -114,35 +115,63 @@ export interface QueryOrderResponse {
 
 export class AeonBankTransferClient {
     private appId: string
-    private apiKey: string | null = null
+    private secret: string
 
     constructor(_useSandbox: boolean = true) {
-        this.appId = import.meta.env.VITE_AEON_APP_ID || SANDBOX_APP_ID
+        this.appId = import.meta.env.VITE_AEON_APP_ID || 'TEST000001'
+        this.secret = import.meta.env.VITE_AEON_SECRET || SANDBOX_SECRET
     }
 
     /**
-     * Set API key for production use
+     * Set API secret for production use
      */
-    setApiKey(apiKey: string) {
-        this.apiKey = apiKey
+    setSecret(secret: string) {
+        this.secret = secret
     }
 
     /**
-     * Generate request signature
-     * For sandbox, we use TEST000001
-     * For production, signature = SHA512(sorted params + apiKey)
+     * Generate request signature.
+     *
+     * Sandbox: sign = appId (literal, e.g. "TEST000001") — per Aeon docs examples
+     * Production: SHA-512 of sorted params + key=<secret>
      */
-    private generateSign(_params: Record<string, any>): string {
-        if (!this.apiKey) {
-            // Sandbox mode - use simple sign
-            return SANDBOX_SIGN
+    private async generateSign(params: Record<string, any>, excludeKeys: string[] = []): Promise<string> {
+        const isSandbox = !import.meta.env.VITE_AEON_SECRET
+
+        if (isSandbox) {
+            // Sandbox: sign is literally the appId value (matches all Aeon docs examples)
+            return this.appId
         }
 
-        // Production signature generation
-        // TODO: Implement proper SHA512 signing when we have real API key
-        // const sortedParams = Object.keys(params).sort().map(k => `${k}=${params[k]}`).join('&')
-        // return sha512(sortedParams + this.apiKey)
-        return SANDBOX_SIGN
+        // Production: SHA-512 per Aeon signature description docs
+        const skipKeys = new Set(['sign', 'key', ...excludeKeys])
+        const flatParams: Record<string, string> = {}
+
+        for (const [k, v] of Object.entries(params)) {
+            if (v === null || v === undefined || v === '') continue
+            if (typeof v === 'object' && !Array.isArray(v)) {
+                for (const [nk, nv] of Object.entries(v)) {
+                    if (skipKeys.has(nk)) continue
+                    if (nv !== null && nv !== undefined && nv !== '') {
+                        flatParams[nk] = String(nv).trim()
+                    }
+                }
+            } else {
+                if (skipKeys.has(k)) continue
+                flatParams[k] = String(v).trim()
+            }
+        }
+
+        const sortedKeys = Object.keys(flatParams).sort()
+        const signString = sortedKeys.map(k => `${k}=${flatParams[k]}`).join('&') + `&key=${this.secret}`
+
+        console.log('=== Aeon Sign String ===', signString)
+
+        const encoder = new TextEncoder()
+        const data = encoder.encode(signString)
+        const hashBuffer = await crypto.subtle.digest('SHA-512', data)
+        const hashArray = Array.from(new Uint8Array(hashBuffer))
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase()
     }
 
     /**
@@ -150,20 +179,12 @@ export class AeonBankTransferClient {
      * Proxied through /api/aeon/banks
      */
     async getAccountForm(currency: 'NGN' = 'NGN'): Promise<AccountFormResponse> {
-        const params = {
-            appId: this.appId,
-            currency,
-        }
+        const params = { appId: this.appId, currency }
 
         const response = await fetch(PROXY_BANKS, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                ...params,
-                sign: this.generateSign(params),
-            }),
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params),
         })
 
         const data = await response.json()
@@ -180,22 +201,12 @@ export class AeonBankTransferClient {
         accountNumber: string,
         currency: 'NGN' = 'NGN'
     ): Promise<BankAccountCheckResponse> {
-        const params = {
-            appId: this.appId,
-            currency,
-            bankCode,
-            accountNumber,
-        }
+        const params = { appId: this.appId, currency, bankCode, accountNumber }
 
         const response = await fetch(PROXY_VERIFY, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                ...params,
-                sign: this.generateSign(params),
-            }),
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params),
         })
 
         const data = await response.json()
@@ -206,19 +217,21 @@ export class AeonBankTransferClient {
     /**
      * Create Bank Transfer Order - Creates payment order for NGN
      * POST /open/api/transfer/payment
-     * 
+     *
      * Returns the USDC amount that needs to be paid
+     * NOTE: Sign is generated server-side by the proxy
      */
     async createOrder(request: CreateOrderRequest): Promise<CreateOrderResponse> {
-        const merchantOrderNo = `PP-${Date.now()}-${Math.random().toString(36).substring(7)}`
+        // Use numeric-only order number to match Aeon docs example format
+        const merchantOrderNo = `${Date.now()}${Math.floor(Math.random() * 10000)}`
 
-        const params = {
+        const params: Record<string, any> = {
             appId: this.appId,
             merchantOrderNo,
             amount: request.amount,
             currency: request.currency,
-            feeType: 'USER_BUCKLE', // User pays the fee
-            userId: request.userId,
+            feeType: 'INNER_BUCKLE',
+            userId: (request.userId || '').trim(),
             userIp: request.userIp,
             email: request.email || request.userId,
             callbackUrl: request.callbackUrl || `${window.location.origin}/api/aeon/webhook`,
@@ -227,46 +240,35 @@ export class AeonBankTransferClient {
                 bankName: request.bankName,
                 bankAccountNumber: request.bankAccountNumber,
             },
-            remark: request.remark || `Payment to ${request.bankName}`,
         }
 
         console.log('=== Aeon Create Order Request ===', params)
 
+        // Sign is generated server-side by the proxy
         const response = await fetch(PROXY_CREATE_ORDER, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                ...params,
-                sign: this.generateSign(params),
-            }),
+            body: JSON.stringify(params),
         })
 
         const data = await response.json()
         console.log('=== Aeon Create Order Response ===', data)
-        return data as CreateOrderResponse
+        // Inject merchantOrderNo so caller can use it for queryOrder polling
+        return { ...data, merchantOrderNo } as CreateOrderResponse
     }
 
     /**
-     * Query Order Status
-     * POST /open/api/transfer/query
+     * Query Order Status — sign generated server-side
      */
-    async queryOrder(orderNo: string): Promise<QueryOrderResponse> {
-        const params = {
-            appId: this.appId,
-            orderNo,
-        }
+    async queryOrder(merchantOrderNo: string): Promise<QueryOrderResponse> {
+        const params = { appId: this.appId, merchantOrderNo }
 
         const response = await fetch(PROXY_QUERY_ORDER, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                ...params,
-                sign: this.generateSign(params),
-            }),
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params),
         })
 
         const data = await response.json()

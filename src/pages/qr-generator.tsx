@@ -301,8 +301,18 @@ export default function QrGenerator() {
       setGenerated(true)
       toast.success("QR code generated successfully!")
 
-      // Update the local state or UI to reflect saved order? 
-      // The user can go to /payments (Orders) to see it.
+      // Save x402Uri back to the order in DB
+      if (newOrderId) {
+        try {
+          await fetch(`/api/payment/order/${newOrderId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ x402Uri: uri })
+          })
+        } catch (err) {
+          console.error("Error saving URI to order:", err)
+        }
+      }
 
     } catch (error) {
       console.error("Error generating QR code:", error)
