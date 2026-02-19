@@ -588,8 +588,8 @@ export default function PaymentReview() {
           <CardFooter className="flex flex-col gap-4 border-t pt-6">
             {stage === 'review' && (
               <>
-                <div className="space-y-3 mb-4">
-                  <Label className="text-sm font-medium">Your Details (Optional)</Label>
+                <div className="space-y-3 mb-4 w-full">
+                  <Label className="text-sm font-medium">Your Details</Label>
                   <div className="grid gap-2">
                     <Input
                       placeholder="Your Name"
