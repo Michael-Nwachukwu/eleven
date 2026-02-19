@@ -13,6 +13,7 @@ import {
     Section,
     Text,
 } from '@react-email/components'
+import * as React from 'react'
 
 interface PaymentReceiptEmailProps {
     payerName?: string
@@ -48,16 +49,7 @@ export function PaymentReceiptEmail({
                 <Container style={container}>
                     {/* Header */}
                     <Section style={header}>
-                        <Img
-                            src="https://collection.cloudinary.com/daujfmxub/d393a0fb326fee89b222e5b1a24fdc28"
-                            alt="Eleven"
-                            width="120"
-                            height="40"
-                            style={{
-                                objectFit: 'contain',
-                                marginBottom: '8px',
-                            }}
-                        />
+                        <Heading style={headerTitle}>Eleven</Heading>
                         <Text style={headerSubtitle}>Payment Receipt</Text>
                     </Section>
 
