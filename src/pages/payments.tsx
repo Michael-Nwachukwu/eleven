@@ -4,7 +4,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { QrCode, Scan, Loader2, ExternalLink, Wallet, CheckCircle2, Copy, AlertCircle, ChevronRight, History } from "lucide-react"
+import { QrCode, Scan, Loader2, ExternalLink, Wallet, CheckCircle2, Copy, AlertCircle, ChevronRight, History, Trash2 } from "lucide-react"
 import { Link, Navigate, useNavigate } from "react-router-dom"
 import { useState, useEffect } from "react"
 import { toast } from "sonner"
@@ -109,6 +109,40 @@ export default function Payments() {
     }
   }
 
+  const deleteOrder = async (orderId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!confirm('Delete this payment order?')) return
+
+    try {
+      const response = await fetch(`/api/payment/order/${orderId}`, { method: 'DELETE' })
+      if (response.ok) {
+        setOrders(prev => prev.filter(o => o.id !== orderId))
+        toast.success('Order deleted')
+      } else {
+        toast.error('Failed to delete order')
+      }
+    } catch {
+      toast.error('Failed to delete order')
+    }
+  }
+
+  const deleteAllOrders = async () => {
+    if (!confirm(`Delete all ${orders.length} payment orders? This cannot be undone.`)) return
+
+    try {
+      await Promise.all(
+        orders.map(order =>
+          fetch(`/api/payment/order/${order.id}`, { method: 'DELETE' })
+        )
+      )
+      setOrders([])
+      toast.success('All orders deleted')
+    } catch {
+      toast.error('Failed to delete some orders')
+      loadOrders() // Refresh to show what remains
+    }
+  }
+
   if (agentLoading) {
     return (
       <DashboardLayout>
@@ -194,9 +228,16 @@ export default function Payments() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold">Payment History</h2>
-            <Button variant="ghost" size="sm" onClick={loadOrders} disabled={loadingOrders}>
-              {loadingOrders ? <Loader2 className="h-4 w-4 animate-spin" /> : <History className="h-4 w-4" />}
-            </Button>
+            <div className="flex items-center gap-2">
+              {orders.length > 0 && (
+                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={deleteAllOrders}>
+                  <Trash2 className="h-4 w-4 mr-1" /> Delete All
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={loadOrders} disabled={loadingOrders}>
+                {loadingOrders ? <Loader2 className="h-4 w-4 animate-spin" /> : <History className="h-4 w-4" />}
+              </Button>
+            </div>
           </div>
 
           {orders.length === 0 ? (
@@ -232,7 +273,7 @@ export default function Payments() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3">
                     <div className="text-right">
                       <div className="font-bold">
                         {order.mode === 'fiat' ? '₦' : ''}{order.amount} {order.mode === 'crypto' ? order.token : ''}
@@ -241,6 +282,14 @@ export default function Payments() {
                         {order.fulfillmentCount} Paid
                       </Badge>
                     </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      onClick={(e) => deleteOrder(order.id, e)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                     <ChevronRight className="h-5 w-5 text-muted-foreground" />
                   </div>
                 </div>

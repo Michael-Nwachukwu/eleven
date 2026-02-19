@@ -3,7 +3,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*')
-    res.setHeader('Access-Control-Allow-Methods', 'GET, PATCH, OPTIONS')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, PATCH, DELETE, OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 
     if (req.method === 'OPTIONS') {
@@ -18,7 +18,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     try {
         // Dynamic import to avoid ESM/CJS cycle on Node v24
-        const { getPaymentOrderById, updatePaymentOrder, getOrderFulfillments } = await import('../../../src/lib/db')
+        const { getPaymentOrderById, updatePaymentOrder, getOrderFulfillments, deletePaymentOrder } = await import('../../../src/lib/db')
 
         if (req.method === 'GET') {
             const order = await getPaymentOrderById(orderId)
@@ -50,6 +50,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             return res.status(200).json(updated)
+
+        } else if (req.method === 'DELETE') {
+            const deleted = await deletePaymentOrder(orderId)
+            if (!deleted) {
+                return res.status(404).json({ error: 'Order not found' })
+            }
+            return res.status(200).json({ success: true, message: 'Order deleted' })
 
         } else {
             return res.status(405).json({ error: 'Method not allowed' })

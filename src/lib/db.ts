@@ -306,6 +306,25 @@ export async function updatePaymentOrder(
     return updated
 }
 
+export async function deletePaymentOrder(id: string): Promise<boolean> {
+    const redis = await getRedisClient()
+    const data = await redis.get(`order:${id}`)
+    if (!data) return false
+
+    const order: PaymentOrder = JSON.parse(data)
+
+    // Remove from the user's order list
+    await redis.lRem(`orders:user:${order.userId}`, 0, id)
+
+    // Delete the order key itself
+    await redis.del(`order:${id}`)
+
+    // Also delete associated fulfillments
+    await redis.del(`fulfillments:${id}`)
+
+    return true
+}
+
 export async function addFulfillment(
     orderId: string,
     fulfillment: Omit<PaymentFulfillment, 'id' | 'orderId' | 'paidAt'>
