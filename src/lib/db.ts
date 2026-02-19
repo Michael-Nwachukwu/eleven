@@ -11,6 +11,7 @@ export interface AgentWallet {
     createdAt: string
     updatedAt: string
     isActive: boolean
+    notificationEmail?: string
 }
 
 export interface Payment {
@@ -171,6 +172,20 @@ export async function getDecryptedPrivateKey(userId: string): Promise<string | n
     if (!agent) return null
 
     return decryptPrivateKey(agent.encryptedPrivateKey)
+}
+
+export async function updateAgentNotificationEmail(userId: string, email: string): Promise<boolean> {
+    const redis = await getRedisClient()
+    const agentId = await redis.get(`agent:user:${userId}`)
+    if (!agentId) return false
+
+    const data = await redis.get(`agent:${agentId}`)
+    if (!data) return false
+
+    const agent: AgentWallet = JSON.parse(data)
+    const updated = { ...agent, notificationEmail: email, updatedAt: new Date().toISOString() }
+    await redis.set(`agent:${agentId}`, JSON.stringify(updated))
+    return true
 }
 
 // Payment History Operations (Legacy / Agent-centric)

@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { LayoutDashboard, PlusCircle, CreditCard, QrCode, Settings, TrendingUp, Wallet } from "lucide-react"
+import elevenLogo from "@/assets/eleven-logo-blue.png"
 
 interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> { }
 
@@ -58,6 +59,7 @@ export function Sidebar({ className }: SidebarProps) {
   return (
     <div className={cn("pb-12 w-64 border-r bg-background hidden md:block", className)}>
       <div className="space-y-4 py-4">
+       
         <div className="px-3 py-2">
           <div className="space-y-1">
             {routes.map((route) => (

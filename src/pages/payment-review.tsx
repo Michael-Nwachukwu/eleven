@@ -108,6 +108,7 @@ export default function PaymentReview() {
 
         // Record fulfillment
         await recordFulfillment(result.transactionHash || '', 'agent', result.amount || '0')
+        sendNotification(result.transactionHash || '')
 
         setProgress(100)
         setStage('complete')
@@ -171,6 +172,7 @@ export default function PaymentReview() {
 
         // Record fulfillment
         await recordFulfillment(result.transactionHash || '', 'external', result.amount || '0')
+        sendNotification(result.transactionHash || '')
 
         setProgress(100)
         setStage('complete')
@@ -222,6 +224,34 @@ export default function PaymentReview() {
     } finally {
       setIsRecording(false)
     }
+  }
+
+  // Fire-and-forget: send email receipt to payer + alert to merchant
+  const sendNotification = (_txHash: string) => {
+    const orderId = paymentRequest?.metadata?.oid
+    if (!orderId) {
+      console.warn('[Notification] No orderId (oid) in payment metadata — skipping email notification')
+      return
+    }
+    console.log('[Notification] Sending receipt for order:', orderId)
+    fetch('/api/notifications/send-receipt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderId,
+        payerEmail: payerEmail.trim() || undefined,
+        payerName: payerName.trim() || undefined,
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json()
+        if (res.ok) {
+          console.log('[Notification] Sent:', data)
+        } else {
+          console.error('[Notification] API error:', res.status, data)
+        }
+      })
+      .catch(err => console.error('[Notification] Network error:', err))
   }
 
   const handleCancel = () => {

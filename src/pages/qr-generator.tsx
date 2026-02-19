@@ -381,7 +381,7 @@ export default function QrGenerator() {
       if (navigator.share) {
         await navigator.share({
           title: `Payment Request: ${displayAmount}`,
-          text: `Pay ${displayAmount} via PayMe`,
+          text: `Pay ${displayAmount} via Eleven`,
           url: paymentLink,
         })
         toast.success("Payment link shared!")

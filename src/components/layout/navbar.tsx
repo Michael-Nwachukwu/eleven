@@ -14,6 +14,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
+import elevenLogo from "@/assets/eleven-logo-blue.png"
+import elevenLogoWhite from "@/assets/eleven-logo-white.png"
+
 export function Navbar() {
   const { login, authenticated, logout, user } = usePrivy()
 
@@ -22,8 +25,9 @@ export function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
           <div className="flex-shrink-0 flex items-center">
-            <Link to="/" className="text-xl font-bold font-mono tracking-tighter">
-              AI<span className="text-primary">.AGENT</span>
+            <Link to="/" className="flex items-center">
+              <img src={elevenLogo} alt="Eleven" className="h-10 dark:hidden" />
+              <img src={elevenLogoWhite} alt="Eleven" className="h-10 hidden dark:block" />
             </Link>
           </div>
 

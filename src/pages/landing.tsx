@@ -76,7 +76,7 @@ export default function LandingPage() {
 
       <footer className="border-t py-12 bg-background">
         <div className="max-w-7xl mx-auto px-4 text-center text-muted-foreground">
-          <p>© 2025 AI Agent Platform. All rights reserved.</p>
+          <p>© 2025 Eleven. All rights reserved.</p>
         </div>
       </footer>
     </div>
