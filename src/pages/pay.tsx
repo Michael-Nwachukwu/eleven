@@ -134,9 +134,21 @@ export default function PayPage() {
                 throw new Error("Please log in first")
             }
 
-            const privateKey = localStorage.getItem(`agent_pk_${user.id}`)
+            let privateKey = localStorage.getItem(`agent_pk_${user.id}`)
+
+            // If not in localStorage, fetch from server (e.g. different browser/device)
             if (!privateKey) {
-                throw new Error("No agent wallet found. Please create an agent first from the dashboard.")
+                const pkRes = await fetch(`/api/agent/${user.id}?action=private-key`)
+                if (!pkRes.ok) {
+                    throw new Error("No agent wallet found. Please create an agent first from the dashboard.")
+                }
+                const pkData = await pkRes.json()
+                privateKey = pkData.privateKey
+                if (!privateKey) {
+                    throw new Error("No agent wallet found. Please create an agent first from the dashboard.")
+                }
+                // Cache it for subsequent payments
+                localStorage.setItem(`agent_pk_${user.id}`, privateKey)
             }
 
             const onProgress = (progressInfo: PaymentProgress) => {
@@ -212,7 +224,7 @@ export default function PayPage() {
             return
         }
         console.log('[Notification] Sending receipt for order:', orderId)
-        fetch('/api/notifications/send-receipt', {
+        fetch('/api/notifications', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

@@ -59,15 +59,32 @@ export interface PaymentFulfillment {
 let redisClient: ReturnType<typeof createClient> | null = null
 
 async function getRedisClient() {
-    if (!redisClient) {
-        redisClient = createClient({
-            url: process.env.REDIS_URL
-        })
-
-        redisClient.on('error', (err) => console.error('Redis Client Error', err))
-
-        await redisClient.connect()
+    if (redisClient?.isReady) {
+        return redisClient
     }
+
+    const url = process.env.REDIS_URL
+    if (!url) {
+        throw new Error('REDIS_URL environment variable is not set')
+    }
+
+    // Close stale client if it exists but isn't ready
+    if (redisClient) {
+        try { await redisClient.disconnect() } catch { /* ignore */ }
+        redisClient = null
+    }
+
+    redisClient = createClient({
+        url,
+        socket: {
+            connectTimeout: 5000,   // 5s connection timeout
+            reconnectStrategy: false, // don't retry in serverless — fail fast
+        },
+    })
+
+    redisClient.on('error', (err) => console.error('Redis Client Error:', err?.message || err))
+
+    await redisClient.connect()
 
     return redisClient
 }

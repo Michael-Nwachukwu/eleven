@@ -256,7 +256,7 @@ export class AeonBankTransferClient {
         const data = await response.json()
         console.log('=== Aeon Create Order Response ===', data)
         // Inject merchantOrderNo so caller can use it for queryOrder polling
-        return { ...data, merchantOrderNo } as CreateOrderResponse
+        return { ...(data as Record<string, unknown>), merchantOrderNo } as CreateOrderResponse
     }
 
     /**

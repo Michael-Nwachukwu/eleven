@@ -1,36 +1,67 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 
+/**
+ * Combined notifications handler:
+ *   POST /api/notifications?action=send-receipt  — send payment receipt emails
+ *   GET  /api/notifications?action=settings      — get notification email setting
+ *   PUT  /api/notifications?action=settings      — update notification email setting
+ */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader('Access-Control-Allow-Origin', '*')
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 
     if (req.method === 'OPTIONS') return res.status(200).end()
+
+    const action = (req.query.action as string) || 'send-receipt'
+
+    // ── Notification settings ─────────────────────────────────────────────
+    if (action === 'settings') {
+        const userId = (req.query.userId as string) || (req.body?.userId as string)
+        if (!userId || typeof userId !== 'string') {
+            return res.status(400).json({ error: 'userId is required' })
+        }
+
+        const { getAgentByUserId, updateAgentNotificationEmail } = await import('../../src/lib/db')
+
+        if (req.method === 'GET') {
+            const agent = await getAgentByUserId(userId)
+            if (!agent) return res.status(404).json({ error: 'Agent not found' })
+            return res.status(200).json({ notificationEmail: agent.notificationEmail || '' })
+
+        } else if (req.method === 'PUT') {
+            const { email } = req.body || {}
+            if (!email || typeof email !== 'string') return res.status(400).json({ error: 'email is required' })
+            const updated = await updateAgentNotificationEmail(userId, email.trim().toLowerCase())
+            if (!updated) return res.status(404).json({ error: 'Agent not found' })
+            return res.status(200).json({ success: true, notificationEmail: email.trim().toLowerCase() })
+
+        } else {
+            return res.status(405).json({ error: 'Method not allowed' })
+        }
+    }
+
+    // ── Send receipt ──────────────────────────────────────────────────────
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
     try {
         const { orderId, payerEmail, payerName } = req.body || {}
         console.log('[send-receipt] Request body:', { orderId, payerEmail, payerName })
-
         if (!orderId) return res.status(400).json({ error: 'orderId is required' })
 
         const { getPaymentOrderById, getAgentByUserId, getOrderFulfillments } = await import('../../src/lib/db')
         const { EmailService } = await import('../../src/lib/email-service')
 
-        // Fetch the order
         const order = await getPaymentOrderById(orderId)
         console.log('[send-receipt] Order found:', order ? order.id : 'NOT FOUND', '| mode:', order?.mode)
         if (!order) return res.status(404).json({ error: 'Order not found' })
 
-        // Fetch the merchant's agent wallet to get their notification email
         const merchantAgent = await getAgentByUserId(order.userId)
         const merchantEmail = merchantAgent?.notificationEmail
         console.log('[send-receipt] Merchant email:', merchantEmail || 'NOT SET')
 
-        // Fetch fulfillments count for the merchant alert
         const fulfillments = await getOrderFulfillments(orderId)
 
-        // Determine currency display
         const currency = order.mode === 'fiat' ? (order.metadata?.currency || order.currency || 'NGN') : (order.token || 'USDC')
         const amount = order.mode === 'fiat' ? (order.metadata?.originalAmount || order.amount) : order.amount
         console.log('[send-receipt] Currency:', currency, '| Amount:', amount)
@@ -49,8 +80,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             date: new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }),
         })
 
-        console.log('[send-receipt] Result — payerSent:', payerSent, '| merchantSent:', merchantSent,
-            '| payerError:', payerError, '| merchantError:', merchantError)
+        console.log('[send-receipt] Result — payerSent:', payerSent, '| merchantSent:', merchantSent)
         return res.status(200).json({
             success: true,
             payerSent,

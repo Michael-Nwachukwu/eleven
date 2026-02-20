@@ -23,7 +23,7 @@ export default function AgentSettings() {
   // Load existing notification email
   useEffect(() => {
     if (!user?.id) return
-    fetch(`/api/notifications/settings?userId=${user.id}`)
+    fetch(`/api/notifications?action=settings&userId=${user.id}`)
       .then(r => r.json())
       .then(data => {
         if (data.notificationEmail) setNotifEmail(data.notificationEmail)
@@ -47,7 +47,7 @@ export default function AgentSettings() {
     }
     setNotifLoading(true)
     try {
-      const res = await fetch('/api/notifications/settings', {
+      const res = await fetch('/api/notifications?action=settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.id, email: notifEmail }),

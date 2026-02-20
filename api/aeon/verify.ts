@@ -5,11 +5,6 @@ const AEON_SANDBOX_URL = 'https://ai-api-sbx.aeon.xyz'
 const AEON_PRODUCTION_URL = 'https://ai-api.aeon.xyz'
 const SANDBOX_SECRET = '9999'
 
-/**
- * Generate sign — for bankCheck, per docs:
- * Sign=Y: appId, currency, bankCode, accountNumber, phoneNumber
- * Sign=N: sign
- */
 function generateSign(params: Record<string, any>, secret: string): string {
     const flatParams: Record<string, string> = {}
     for (const [k, v] of Object.entries(params)) {
@@ -22,6 +17,11 @@ function generateSign(params: Record<string, any>, secret: string): string {
     return createHash('sha512').update(signString, 'utf8').digest('hex').toUpperCase()
 }
 
+/**
+ * Combined handler for:
+ *   POST /api/aeon/verify?action=verify  — bank account verification
+ *   POST /api/aeon/verify?action=webhook — Aeon webhook receiver
+ */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
@@ -30,12 +30,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === 'OPTIONS') return res.status(200).end()
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
+    const action = (req.query.action as string) || 'verify'
+
+    // ── Webhook handler ────────────────────────────────────────────────────
+    if (action === 'webhook') {
+        try {
+            const body = req.body
+            console.log('=== Aeon Webhook Received ===', JSON.stringify(body, null, 2))
+            return res.status(200).json({ success: true })
+        } catch (error: any) {
+            console.error('Aeon webhook error:', error)
+            return res.status(200).json({ success: true }) // Always 200 to prevent Aeon retries
+        }
+    }
+
+    // ── Bank account verification ──────────────────────────────────────────
     try {
         const { appId, currency, bankCode, accountNumber, phoneNumber } = req.body
         const baseUrl = appId === 'TEST000001' ? AEON_SANDBOX_URL : AEON_PRODUCTION_URL
         const secret = process.env.AEON_SECRET || SANDBOX_SECRET
 
-        // Build params (only include defined fields)
         const params: Record<string, any> = { appId, currency }
         if (bankCode) params.bankCode = bankCode
         if (accountNumber) params.accountNumber = accountNumber

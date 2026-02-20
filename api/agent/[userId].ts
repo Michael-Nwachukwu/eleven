@@ -16,14 +16,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     try {
         // Dynamic import to avoid ESM/CJS cycle on Node v24
-        const { getAgentByUserId } = await import('../../src/lib/db')
+        const { getAgentByUserId, getDecryptedPrivateKey } = await import('../../src/lib/db')
 
-        const { userId } = req.query
+        const { userId, action } = req.query
 
         if (!userId || typeof userId !== 'string') {
             return res.status(400).json({ error: 'userId is required' })
         }
 
+        // ── Private key retrieval (for agent wallet signing) ──────────────
+        if (action === 'private-key') {
+            const privateKey = await getDecryptedPrivateKey(userId)
+            if (!privateKey) {
+                return res.status(404).json({ error: 'Agent not found or no private key' })
+            }
+            return res.status(200).json({ privateKey })
+        }
+
+        // ── Default: return agent info ────────────────────────────────────
         const agent = await getAgentByUserId(userId)
 
         if (!agent) {

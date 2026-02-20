@@ -234,7 +234,7 @@ export default function PaymentReview() {
       return
     }
     console.log('[Notification] Sending receipt for order:', orderId)
-    fetch('/api/notifications/send-receipt', {
+    fetch('/api/notifications', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
