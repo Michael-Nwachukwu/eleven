@@ -6,7 +6,7 @@
 
 ## Overview
 
-Eleven bridges the gap between on-chain money and real-world commerce. Merchants generate a payment QR code, customers scan and pay — in crypto or local fiat — and settlement lands directly on Arbitrum. An embedded AI agent wallet handles signing, routing, and fiat conversion without custodying user funds.
+Eleven bridges the gap between on-chain money, autonomous agents, and real-world commerce. Merchants generate a payment QR code, and customers (or their autonomous AI agents) scan/parse and pay in crypto or local fiat. Settlement lands directly on Arbitrum. An embedded AI agent wallet handles signing, routing, and fiat conversion without custodying user funds, natively enabling **Agent-to-Agent** commerce.
 
 ---
 
@@ -31,10 +31,11 @@ Eleven bridges the gap between on-chain money and real-world commerce. Merchants
 ### QR Code Payments (x402 Protocol)
 
 - Merchants generate a shareable QR code encoding a signed **x402** payment request
+- **Agent-to-Agent Native:** Because the URI follows a strict parseable schema, other AI bots, trading assistants, and intelligent agents can read the code and autonomously execute payments directly to your merchant agent.
 - Supports two payment modes from the same QR:
-  - **Crypto**: USDC / ETH on Arbitrum, paid directly by connected wallet or agent
+  - **Crypto**: USDC / ETH on Arbitrum, paid directly by a connected human wallet or an autonomous AI agent
   - **Fiat**: Vietnamese Dong (VND) / Nigerian Naira (NGN) via **Aeon** bank settlement
-- Customers scan with any camera — no app install required
+- Human customers can scan with any camera — no app install required
 - Payment page shows order amount, merchant name, and a step-by-step execution flow
 
 ### Fiat Settlement via Aeon
