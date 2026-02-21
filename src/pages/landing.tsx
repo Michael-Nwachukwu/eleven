@@ -2,7 +2,7 @@
 
 import { usePrivy } from "@privy-io/react-auth"
 import { Navigate } from "react-router-dom"
-import { ArrowRight, Bot, Shield, Zap, QrCode, Globe, CreditCard, Mail } from "lucide-react"
+import { ArrowRight, Bot, Shield, Zap, QrCode, Globe, CreditCard, Mail, Fingerprint } from "lucide-react"
 import { Navbar } from "@/components/layout/navbar"
 import { Button } from "@/components/ui/button"
 
@@ -42,7 +42,7 @@ export default function LandingPage() {
 
             <p className="text-xl md:text-2xl text-muted-foreground max-w-3xl mx-auto leading-relaxed">
               Accept payments from humans and AI agents via one QR code.
-              Instant, self-custodial settlement on Arbitrum.
+              Verifiable agent identities with ENS. Instant, self-custodial settlement on Arbitrum.
             </p>
 
             <div className="pt-10 flex flex-col sm:flex-row gap-4 justify-center items-center">
@@ -125,11 +125,11 @@ export default function LandingPage() {
               {/* Feature 6 */}
               <div className="bg-background/80 backdrop-blur-sm p-8 rounded-2xl border border-border/50 shadow-sm hover:shadow-md hover:border-rose-500/50 transition-all group">
                 <div className="h-14 w-14 rounded-2xl bg-rose-500/10 flex items-center justify-center mb-6 group-hover:bg-rose-500/20 group-hover:scale-110 transition-all">
-                  <Shield className="h-7 w-7 text-rose-500" />
+                  <Fingerprint className="h-7 w-7 text-rose-500" />
                 </div>
-                <h3 className="text-xl font-bold mb-3">Zero Custody</h3>
+                <h3 className="text-xl font-bold mb-3">Agent Identity & ENS</h3>
                 <p className="text-muted-foreground leading-relaxed">
-                  You maintain full control of your keys and funds. Secured by Privy authentication and robust decentralized smart contracts.
+                  Give your agent a verifiable ERC-8004 identity and a human-readable ENS subdomain like <code className="text-xs bg-muted px-1 py-0.5 rounded">mystore.0xkitchens.eth</code>. Discoverable by other agents and humans.
                 </p>
               </div>
             </div>
@@ -152,10 +152,10 @@ export default function LandingPage() {
               <div className="hidden md:block absolute top-12 left-[12%] right-[12%] h-[2px] bg-border z-0" />
 
               {[
-                { step: "01", title: "Create Agent", desc: "Sign in with Privy to provision your on-chain agent wallet." },
-                { step: "02", title: "Generate QR", desc: "Create a signed x402 payment link for crypto or fiat." },
-                { step: "03", title: "Customer Pays", desc: "Users scan and pay via USDC, ETH, or local Bank Transfer." },
-                { step: "04", title: "Instant Settlement", desc: "Funds land directly in your agent wallet on Arbitrum." }
+                { step: "01", title: "Create Agent", desc: "Sign in with Privy and claim your ENS subdomain to provision your on-chain agent." },
+                { step: "02", title: "Generate QR", desc: "Create a signed x402 payment link for crypto or fiat — your ENS name is embedded." },
+                { step: "03", title: "Customer Pays", desc: "Users scan and pay via USDC, ETH, or local Bank Transfer — they see your ENS identity." },
+                { step: "04", title: "Instant Settlement", desc: "Funds land directly in your agent wallet on Arbitrum. Fully verifiable." }
               ].map((item, i) => (
                 <div key={i} className="relative z-10 flex flex-col items-center text-center space-y-5 px-2">
                   <div className="w-24 h-24 rounded-full bg-background border-4 border-muted flex items-center justify-center shadow-lg group hover:border-primary/50 transition-all">

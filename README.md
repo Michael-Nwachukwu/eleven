@@ -1,12 +1,12 @@
 # Eleven — Programmable Crypto Payments
 
-> A self-custodial payment platform that lets anyone accept crypto and fiat payments through a shareable QR code, powered by an autonomous AI agent wallet on Arbitrum.
+> A self-custodial payment platform that lets anyone accept crypto and fiat payments through a shareable QR code, powered by an autonomous AI agent wallet with a verifiable on-chain identity on Arbitrum.
 
 ---
 
 ## Overview
 
-Eleven bridges the gap between on-chain money, autonomous agents, and real-world commerce. Merchants generate a payment QR code, and customers (or their autonomous AI agents) scan/parse and pay in crypto or local fiat. Settlement lands directly on Arbitrum. An embedded AI agent wallet handles signing, routing, and fiat conversion without custodying user funds, natively enabling **Agent-to-Agent** commerce.
+Eleven bridges the gap between on-chain money, autonomous agents, and real-world commerce. Merchants generate a payment QR code, and customers (or their autonomous AI agents) scan/parse and pay in crypto or local fiat. Settlement lands directly on Arbitrum. An embedded AI agent wallet handles signing, routing, and fiat conversion without custodying user funds, natively enabling **Agent-to-Agent** commerce. Each agent can be registered on-chain with a verifiable **ERC-8004** identity and a human-readable **ENS subdomain**, making them discoverable to other agents and humans alike.
 
 ---
 
@@ -58,10 +58,20 @@ Eleven bridges the gap between on-chain money, autonomous agents, and real-world
 - Per-order detail view with on-chain transaction links
 - Send modal for direct USDC transfers
 
-### ENS Integration
+### ENS Subdomains (NameStone)
 
-- Optional ENS name setup for each agent wallet
-- Human-readable `.eth` names as payment identifiers
+- Each agent can claim a free, gasless ENS subdomain under `0xkitchens.eth` (e.g. `mystore.0xkitchens.eth`)
+- Powered by **NameStone CCIP-Read** — names resolve on Mainnet without gas costs
+- ENS names are shown as the **payment recipient** on customer-facing pay pages and QR codes
+- Real-time availability checking during agent creation and in settings
+- Existing agents can claim a name at any time from the Agent Settings page
+
+### Agent Identity (ERC-8004)
+
+- Each agent can mint a verifiable **ERC-8004** identity NFT
+- Off-chain MVP stores metadata in Redis: agent name, capabilities, ENS handle, wallet address
+- "Mint Identity" button in settings — prepares agents for on-chain migration when the Identity Registry contract is deployed
+- Identity metadata follows the ERC-8004 JSON standard for cross-platform agent discovery
 
 ---
 
@@ -85,14 +95,14 @@ Eleven bridges the gap between on-chain money, autonomous agents, and real-world
                         │
 ┌───────────────────────▼─────────────────────────────────┐
 │                 Arbitrum One (Primary Chain)              │
-│         USDC Settlement · Agent Wallets · ENS            │
+│     USDC Settlement · Agent Wallets · ERC-8004 Identity   │
 └─────────────────────────────────────────────────────────┘
                         │
-             ┌──────────▼──────────┐
-             │      LI.FI SDK      │
-             │  Base · Optimism    │
-             │  Scroll · zkSync    │
-             └─────────────────────┘
+             ┌──────────▼──────────┐     ┌────────────────┐
+             │      LI.FI SDK      │     │   NameStone    │
+             │  Base · Optimism    │     │  ENS Subdomains│
+             │  Scroll · zkSync    │     │  (CCIP-Read)   │
+             └─────────────────────┘     └────────────────┘
 ```
 
 ---
@@ -108,6 +118,8 @@ Eleven bridges the gap between on-chain money, autonomous agents, and real-world
 | **Transaction Signing** | Thirdweb SDK, Viem |
 | **Blockchain** | Arbitrum One (primary), Base, Optimism, Scroll, zkSync Era |
 | **Fiat Settlement** | Aeon x402 API |
+| **ENS Subdomains** | NameStone CCIP-Read API |
+| **Agent Identity** | ERC-8004 (off-chain MVP) |
 | **Email** | Resend + React Email |
 | **API / Backend** | Vercel Serverless Functions (Node.js) |
 | **State / Orders** | Redis (Upstash) |
@@ -135,10 +147,12 @@ Eleven bridges the gap between on-chain money, autonomous agents, and real-world
 
 1. **Sign in** with Privy (email, Google, or external wallet)
 2. **Create agent** — a non-custodial wallet is provisioned on Arbitrum
-3. **Fund agent** — deposit USDC from any supported chain via the Smart Multichain Deposit
-4. **Generate QR** — configure amount, token, description, and optionally link a bank account for fiat
-5. **Share QR** — share the link or QR image; payments arrive directly to the agent wallet
-6. **Receive email receipt** — payers get a confirmation email automatically
+3. **Claim ENS name** *(optional)* — register a human-readable subdomain like `mystore.0xkitchens.eth`
+4. **Fund agent** — deposit USDC from any supported chain via the Smart Multichain Deposit
+5. **Mint identity** *(optional)* — create a verifiable ERC-8004 agent profile
+6. **Generate QR** — configure amount, token, description, and optionally link a bank account for fiat
+7. **Share QR** — share the link or QR image; payments arrive directly to the agent wallet
+8. **Receive email receipt** — payers get a confirmation email automatically
 
 ### Customer Flow
 
@@ -193,6 +207,10 @@ VITE_ARBITRUM_RPC_URL=https://arb1.arbitrum.io/rpc
 # Backend
 ENCRYPTION_SECRET=your-secret-key
 REDIS_URL=your-redis-url
+
+# ENS Subdomains (NameStone)
+NAMESTONE_API_KEY=your-namestone-api-key
+VITE_ENS_DOMAIN=0xkitchens.eth
 ```
 
 ### Run locally
@@ -225,18 +243,20 @@ pp/
 │   ├── services/
 │   │   ├── lifi-service.ts     # Multichain deposit orchestration
 │   │   ├── payment-service.ts  # x402 payment execution
+│   │   ├── namestone-service.ts # ENS subdomain registration (NameStone API)
+│   │   ├── erc8004-service.ts  # Agent identity minting (ERC-8004 MVP)
 │   │   ├── aeon-x402-clientt.ts # Aeon fiat settlement client
 │   │   └── thirdweb-agent-service.ts
 │   ├── lib/
 │   │   ├── x402.ts            # x402 URI encode/decode
-│   │   ├── db.ts              # Redis order storage
+│   │   ├── db.ts              # Redis order + agent metadata storage
 │   │   └── email-service.ts   # Resend integration
 │   └── types/
 │       └── lifi-types.ts      # Multichain deposit types
 ├── api/
 │   ├── payment/           # Order create/fulfill/query
 │   ├── aeon/              # Aeon API proxy (banks, orders)
-│   ├── agent/             # CDP agent provisioning
+│   ├── agent/             # Agent provisioning, ENS, ERC-8004
 │   └── notifications/     # Email receipt dispatch
 └── contracts/             # On-chain references
 ```
