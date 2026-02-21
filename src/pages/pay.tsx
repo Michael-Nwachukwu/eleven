@@ -37,6 +37,7 @@ export default function PayPage() {
     const [payerName, setPayerName] = useState('')
     const [payerEmail, setPayerEmail] = useState('')
     const [isRecording, setIsRecording] = useState(false)
+    const [recipientEns, setRecipientEns] = useState<string | null>(null)
 
     // Detect payment mode
     const isFiatPayment = paymentRequest?.metadata?.mode === 'fiat' || paymentRequest?.metadata?.provider === 'aeon'
@@ -61,6 +62,25 @@ export default function PayPage() {
             setDecodeError(err.message || 'Invalid payment link')
         }
     }, [paymentData, authenticated])
+
+    // Resolve recipient ENS name dynamically
+    useEffect(() => {
+        if (!paymentRequest?.payTo) return
+        // If metadata already has an ENS name, use that
+        if (paymentRequest.metadata?.seller?.includes('.eth')) {
+            setRecipientEns(paymentRequest.metadata.seller)
+            return
+        }
+        // Otherwise look it up from the backend
+        fetch(`/api/agent/_?action=resolve-address&address=${paymentRequest.payTo}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.ensName) {
+                    setRecipientEns(`${data.ensName}.0xkitchens.eth`)
+                }
+            })
+            .catch(() => { /* ignore */ })
+    }, [paymentRequest?.payTo, paymentRequest?.metadata?.seller])
 
     // Update stage when auth state changes
     useEffect(() => {
@@ -380,9 +400,15 @@ export default function PayPage() {
                         {/* Crypto Details */}
                         {isCryptoPayment && (
                             <div className="space-y-2 text-sm">
-                                <div className="flex justify-between">
+                                <div className="flex justify-between items-center">
                                     <span className="text-muted-foreground">Recipient</span>
-                                    <span className="font-mono font-medium">{formatAddress(paymentRequest.payTo)}</span>
+                                    {recipientEns ? (
+                                        <span className="text-sm font-medium text-primary bg-primary/10 px-2 py-1 rounded">
+                                            {recipientEns}
+                                        </span>
+                                    ) : (
+                                        <span className="font-mono font-medium">{formatAddress(paymentRequest.payTo)}</span>
+                                    )}
                                 </div>
                                 <div className="flex justify-between">
                                     <span className="text-muted-foreground">Network</span>

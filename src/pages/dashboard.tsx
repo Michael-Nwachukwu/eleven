@@ -6,7 +6,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty-state"
-import { Loader2, Copy, ExternalLink, Wallet, Coins, QrCode, ArrowUpRight, Plus, Bot, History, CreditCard } from "lucide-react"
+import { Loader2, Copy, ExternalLink, Wallet, Coins, QrCode, ArrowUpRight, Plus, Bot, History, CreditCard, Globe } from "lucide-react"
 import { Link, useNavigate, Navigate } from "react-router-dom"
 import { useState, useEffect } from "react"
 import { toast } from "sonner"
@@ -150,7 +150,9 @@ export default function Dashboard() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-            <p className="text-muted-foreground mt-2">Overview of your payment agent</p>
+            <p className="text-muted-foreground mt-2">
+              {agent.ensName ? `Agent: ${agent.ensName}.0xkitchens.eth` : 'Overview of your payment agent'}
+            </p>
           </div>
           <Button asChild>
             <Link to="/qr-generator">
@@ -185,6 +187,19 @@ export default function Dashboard() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* ENS Name (if available) */}
+                {agent.ensName && (
+                  <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 flex justify-between items-center">
+                    <div>
+                      <div className="text-xs text-primary font-medium mb-1">ENS Subdomain</div>
+                      <div className="font-semibold text-lg">{agent.ensName}.0xkitchens.eth</div>
+                    </div>
+                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                      <Globe className="h-5 w-5 text-primary" />
+                    </div>
+                  </div>
+                )}
+
                 {/* Address */}
                 <div className="bg-muted/50 rounded-lg p-4">
                   <div className="text-xs text-muted-foreground mb-1">Wallet Address</div>

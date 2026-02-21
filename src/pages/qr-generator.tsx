@@ -219,7 +219,7 @@ export default function QrGenerator() {
           metadata: {
             itemName: description || "Payment Request",
             timestamp: Date.now(),
-            seller: agentAddress,
+            seller: agent?.ensName ? `${agent.ensName}.0xkitchens.eth` : agentAddress,
             token: token,
             mode: 'crypto',
             oid: newOrderId // Embed Order ID
