@@ -11,6 +11,15 @@ export interface AgentWallet {
     ensName?: string
     agentName?: string
     erc8004TokenId?: string
+    // Tax
+    taxEnabled?: boolean
+    taxRate?: number
+    taxLabel?: string
+    // Yield
+    yieldEnabled?: boolean
+    yieldAllocationPercent?: number
+    yieldMonthlyLimit?: number
+    yieldAutoHarvest?: boolean
 }
 
 // Force API usage (Vercel KV) even in dev mode to ensure consistency

@@ -14,10 +14,10 @@ Eleven bridges the gap between on-chain money, autonomous agents, and real-world
 
 ### AI Agent Wallet
 
-- Non-custodial agent wallets provisioned per user via **Thirdweb agent Kit**
+- Non-custodial agent wallets provisioned per user via **Thirdweb Agent Kit**
 - Each agent is a smart EOA on **Arbitrum One** that can sign transactions autonomously
 - Balances (USDC + ETH) visible on the dashboard in real time
-- Agent settings for custom names, ENS, and strategy configuration
+- Agent settings for custom names, ENS, tax configuration, and yield strategy
 
 ### Multichain Smart Deposit
 
@@ -36,7 +36,28 @@ Eleven bridges the gap between on-chain money, autonomous agents, and real-world
   - **Crypto**: USDC / ETH on Arbitrum, paid directly by a connected human wallet or an autonomous AI agent
   - **Fiat**: Vietnamese Dong (VND) / Nigerian Naira (NGN) via **Aeon** bank settlement
 - Human customers can scan with any camera — no app install required
-- Payment page shows order amount, merchant name, and a step-by-step execution flow
+- Payment page shows order amount, merchant name, ENS identity, and (when applicable) a tax line-item breakdown
+
+### Tax Configuration
+
+- Merchants can optionally enable a **tax rate** (e.g. 7.5% VAT) in Agent Settings
+- Tax is added **on top** of the merchant's price — the customer pays the full total in one on-chain transfer
+- Payment QR codes automatically embed the tax-inclusive total with metadata: `subtotal`, `taxRate`, `taxAmount`, `taxLabel`
+- Customer-facing pay pages show a clear line-item breakdown: **Subtotal → Tax (VAT/GST/etc.) → Total**
+- Fulfillment records log the tax portion separately for merchant accounting
+- Supported labels: VAT, GST, Sales Tax, Service Charge
+- Fiat payments are unaffected — tax only applies to crypto QR payments
+
+### Yield Optimization (Aave V3)
+
+- Merchants can enable **autonomous yield** on every incoming crypto payment
+- A configurable **allocation percentage** (via a slider, e.g. 40%) of each payment is automatically deposited into **Aave V3 on Arbitrum** (~1.8% APY)
+- Funds are held as **aUSDC** — Aave's yield-bearing receipt token — accruing interest every block
+- A **monthly investment cap** prevents over-allocation in any single month
+- **Auto-harvest**: when the agent needs to make an outgoing payment but has insufficient liquid USDC, it checks the Aave balance and withdraws the needed amount automatically
+- Manual deposit / withdraw controls available from the Strategies page
+- ETH Accumulation and Liquidity Provision strategies shown as *Coming Soon*
+- Fiat payments (Aeon) are **excluded** — only on-chain USDC payments trigger auto-invest
 
 ### Fiat Settlement via Aeon
 
@@ -80,7 +101,7 @@ Eleven bridges the gap between on-chain money, autonomous agents, and real-world
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                     Frontend (Vite + React)              │
-│  Dashboard │ QR Generator │ Pay Page │ Fund Agent       │
+│  Dashboard │ QR Generator │ Pay Page │ Strategies       │
 └───────────────────────┬─────────────────────────────────┘
                         │ HTTPS
 ┌───────────────────────▼─────────────────────────────────┐
@@ -95,14 +116,15 @@ Eleven bridges the gap between on-chain money, autonomous agents, and real-world
                         │
 ┌───────────────────────▼─────────────────────────────────┐
 │                 Arbitrum One (Primary Chain)              │
-│     USDC Settlement · Agent Wallets · ERC-8004 Identity   │
+│  USDC Settlement · Agent Wallets · ERC-8004 · Aave V3    │
 └─────────────────────────────────────────────────────────┘
                         │
-             ┌──────────▼──────────┐     ┌────────────────┐
-             │      LI.FI SDK      │     │   NameStone    │
-             │  Base · Optimism    │     │  ENS Subdomains│
-             │  Scroll · zkSync    │     │  (CCIP-Read)   │
-             └─────────────────────┘     └────────────────┘
+    ┌───────────────────┼───────────────────┐
+    ▼                   ▼                   ▼
+┌───────────┐    ┌────────────┐    ┌────────────────┐
+│  LI.FI    │    │  NameStone │    │   Aave V3      │
+│ (Bridging)│    │ (ENS Names)│    │ (Yield ~1.8%)  │
+└───────────┘    └────────────┘    └────────────────┘
 ```
 
 ---
@@ -120,6 +142,7 @@ Eleven bridges the gap between on-chain money, autonomous agents, and real-world
 | **Fiat Settlement** | Aeon x402 API |
 | **ENS Subdomains** | NameStone CCIP-Read API |
 | **Agent Identity** | ERC-8004 (off-chain MVP) |
+| **Yield** | Aave V3 on Arbitrum (~1.8% APY on USDC) |
 | **Email** | Resend + React Email |
 | **API / Backend** | Vercel Serverless Functions (Node.js) |
 | **State / Orders** | Redis (Upstash) |
@@ -150,9 +173,11 @@ Eleven bridges the gap between on-chain money, autonomous agents, and real-world
 3. **Claim ENS name** *(optional)* — register a human-readable subdomain like `mystore.0xkitchens.eth`
 4. **Fund agent** — deposit USDC from any supported chain via the Smart Multichain Deposit
 5. **Mint identity** *(optional)* — create a verifiable ERC-8004 agent profile
-6. **Generate QR** — configure amount, token, description, and optionally link a bank account for fiat
-7. **Share QR** — share the link or QR image; payments arrive directly to the agent wallet
-8. **Receive email receipt** — payers get a confirmation email automatically
+6. **Configure tax** *(optional)* — set a VAT/GST rate; all QR payments will include a customer-facing tax breakdown
+7. **Enable yield** *(optional)* — set an allocation % in Agent Settings; a portion of every incoming crypto payment is automatically deposited into Aave V3
+8. **Generate QR** — configure amount, token, description, and optionally link a bank account for fiat
+9. **Share QR** — share the link or QR image; payments arrive directly to the agent wallet
+10. **Receive email receipt** — payers get a confirmation email automatically
 
 ### Customer Flow
 
@@ -191,6 +216,9 @@ Copy `.env.example` to `.env.local` and fill in:
 ```env
 # Auth
 VITE_PRIVY_APP_ID=your-privy-app-id
+
+# Payment Splitter
+VITE_SPLITTER_ADDRESS=your-splitter-contract-address
 
 # Thirdweb
 VITE_THIRDWEB_CLIENT_ID=your-thirdweb-client-id
@@ -243,6 +271,7 @@ pp/
 │   ├── services/
 │   │   ├── lifi-service.ts     # Multichain deposit orchestration
 │   │   ├── payment-service.ts  # x402 payment execution
+│   │   ├── aave-service.ts     # Aave V3 supply/withdraw/position (yield)
 │   │   ├── namestone-service.ts # ENS subdomain registration (NameStone API)
 │   │   ├── erc8004-service.ts  # Agent identity minting (ERC-8004 MVP)
 │   │   ├── aeon-x402-clientt.ts # Aeon fiat settlement client

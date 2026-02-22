@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
-import { Bot, Shield, Zap, Save, Bell, Loader2, CheckCircle2, Fingerprint, Globe } from "lucide-react"
+import { Bot, Shield, Zap, Save, Bell, Loader2, CheckCircle2, Fingerprint, Globe, Receipt, TrendingUp } from "lucide-react"
 import { toast } from "sonner"
 import { useState, useEffect } from "react"
 import { usePrivy } from "@privy-io/react-auth"
@@ -33,10 +33,32 @@ export default function AgentSettings() {
   const [isMinting, setIsMinting] = useState(false)
   const [mintedId, setMintedId] = useState<string | null>(null)
 
+  // Tax State
+  const [taxEnabled, setTaxEnabled] = useState(false)
+  const [taxRate, setTaxRate] = useState('0')
+  const [taxLabel, setTaxLabel] = useState('VAT')
+  const [taxLoading, setTaxLoading] = useState(false)
+  const [taxSaved, setTaxSaved] = useState(false)
+
+  // Yield / Strategy State
+  const [yieldEnabled, setYieldEnabled] = useState(false)
+  const [yieldAllocation, setYieldAllocation] = useState(40)   // % of payment to invest
+  const [yieldMonthlyLimit, setYieldMonthlyLimit] = useState('500')
+  const [yieldAutoHarvest, setYieldAutoHarvest] = useState(true)
+  const [yieldLoading, setYieldLoading] = useState(false)
+  const [yieldSaved, setYieldSaved] = useState(false)
+
   // Form Population
   useEffect(() => {
     if (agent?.ensName) setEnsName(agent.ensName)
     if (agent?.erc8004TokenId) setMintedId(agent.erc8004TokenId)
+    if (agent?.taxEnabled !== undefined) setTaxEnabled(agent.taxEnabled)
+    if (agent?.taxRate !== undefined) setTaxRate(String(agent.taxRate))
+    if (agent?.taxLabel) setTaxLabel(agent.taxLabel)
+    if (agent?.yieldEnabled !== undefined) setYieldEnabled(agent.yieldEnabled)
+    if (agent?.yieldAllocationPercent !== undefined) setYieldAllocation(agent.yieldAllocationPercent)
+    if (agent?.yieldMonthlyLimit !== undefined) setYieldMonthlyLimit(String(agent.yieldMonthlyLimit))
+    if (agent?.yieldAutoHarvest !== undefined) setYieldAutoHarvest(agent.yieldAutoHarvest)
   }, [agent])
 
   // Debounce ENS check
@@ -161,6 +183,62 @@ export default function AgentSettings() {
       toast.error("Failed to mint identity.")
     } finally {
       setIsMinting(false)
+    }
+  }
+
+  const handleSaveTax = async () => {
+    if (!user?.id) return
+    const rate = parseFloat(taxRate)
+    if (isNaN(rate) || rate < 0 || rate > 99.9) {
+      toast.error('Tax rate must be between 0 and 99.9%')
+      return
+    }
+    setTaxLoading(true)
+    try {
+      const res = await fetch(`/api/agent/${user.id}?action=update-tax`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taxEnabled, taxRate: rate, taxLabel }),
+      })
+      if (res.ok) {
+        setTaxSaved(true)
+        toast.success('Tax settings saved!')
+        setTimeout(() => setTaxSaved(false), 3000)
+      } else {
+        toast.error('Failed to save tax settings')
+      }
+    } catch {
+      toast.error('Failed to save tax settings')
+    } finally {
+      setTaxLoading(false)
+    }
+  }
+
+  const handleSaveYieldSettings = async () => {
+    if (!user?.id) return
+    setYieldLoading(true)
+    try {
+      const res = await fetch(`/api/agent/${user.id}?action=update-yield-settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          yieldEnabled,
+          yieldAllocationPercent: yieldAllocation,
+          yieldMonthlyLimit: parseFloat(yieldMonthlyLimit) || 0,
+          yieldAutoHarvest,
+        }),
+      })
+      if (res.ok) {
+        setYieldSaved(true)
+        toast.success('Yield strategy settings saved!')
+        setTimeout(() => setYieldSaved(false), 3000)
+      } else {
+        toast.error('Failed to save yield settings')
+      }
+    } catch {
+      toast.error('Failed to save yield settings')
+    } finally {
+      setYieldLoading(false)
     }
   }
 
@@ -304,6 +382,74 @@ export default function AgentSettings() {
           </CardContent>
         </Card>
 
+        {/* === TAX CONFIGURATION === */}
+        <Card className="mb-6">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Receipt className="h-5 w-5 text-primary" />
+              <CardTitle>Tax Configuration</CardTitle>
+            </div>
+            <CardDescription>
+              Add a tax rate to your payments — customers see a full breakdown (subtotal + tax = total).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>Enable Tax Collection</Label>
+                <div className="text-sm text-muted-foreground">Apply a tax rate to all incoming payments</div>
+              </div>
+              <Switch checked={taxEnabled} onCheckedChange={setTaxEnabled} />
+            </div>
+
+            {taxEnabled && (
+              <div className="space-y-4 pt-2 border-t">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="tax-rate">Tax Rate (%)</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="tax-rate"
+                        type="number"
+                        min="0"
+                        max="99.9"
+                        step="0.1"
+                        value={taxRate}
+                        onChange={e => setTaxRate(e.target.value)}
+                        className="w-28"
+                      />
+                      <span className="text-muted-foreground text-sm">%</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="tax-label">Tax Label</Label>
+                    <Select value={taxLabel} onValueChange={setTaxLabel}>
+                      <SelectTrigger id="tax-label">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="VAT">VAT</SelectItem>
+                        <SelectItem value="GST">GST</SelectItem>
+                        <SelectItem value="Sales Tax">Sales Tax</SelectItem>
+                        <SelectItem value="Service Charge">Service Charge</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground border">
+                  Example: A $100 order → customer pays <strong>${(100 * (1 + parseFloat(taxRate || '0') / 100)).toFixed(2)}</strong> ($100.00 + {taxLabel} {taxRate || '0'}%)
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end">
+              <Button onClick={handleSaveTax} disabled={taxLoading} variant={taxSaved ? 'outline' : 'default'}>
+                {taxLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : taxSaved ? <><CheckCircle2 className="h-4 w-4 mr-1 text-green-500" />Saved</> : <><Save className="h-4 w-4 mr-1" />Save Tax Settings</>}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>General Configuration</CardTitle>
@@ -327,54 +473,74 @@ export default function AgentSettings() {
 
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle>Risk &amp; Strategy</CardTitle>
-            <CardDescription>Define how your agent manages assets.</CardDescription>
+            <div className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-primary" />
+              <CardTitle>Yield Strategy</CardTitle>
+            </div>
+            <CardDescription>
+              Automatically invest a portion of every incoming crypto payment into Aave V3 for yield.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <Label>Risk Tolerance</Label>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="border rounded-lg p-4 cursor-pointer hover:border-primary transition-colors bg-card hover:bg-accent/50 relative">
-                  <input type="radio" name="risk" className="absolute inset-0 opacity-0 cursor-pointer" />
-                  <Shield className="h-6 w-6 mb-2 text-green-500" />
-                  <div className="font-medium">Conservative</div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>Enable Yield Optimization</Label>
+                <div className="text-sm text-muted-foreground">Deposit a % of each crypto payment into Aave V3 (~1.8% APY)</div>
+              </div>
+              <Switch checked={yieldEnabled} onCheckedChange={setYieldEnabled} />
+            </div>
+
+            <div className="space-y-4" style={{ opacity: yieldEnabled ? 1 : 0.5, pointerEvents: yieldEnabled ? 'auto' : 'none' }}>
+              <div className="space-y-3">
+                <div className="flex justify-between">
+                  <Label>Yield Allocation (% of each payment)</Label>
+                  <span className="text-sm font-semibold text-primary">{yieldAllocation}%</span>
                 </div>
-                <div className="border rounded-lg p-4 cursor-pointer hover:border-primary transition-colors bg-card hover:bg-accent/50 relative ring-2 ring-primary">
-                  <input type="radio" name="risk" className="absolute inset-0 opacity-0 cursor-pointer" defaultChecked />
-                  <Bot className="h-6 w-6 mb-2 text-blue-500" />
-                  <div className="font-medium">Balanced</div>
+                <Slider
+                  value={[yieldAllocation]}
+                  onValueChange={([v]) => setYieldAllocation(v)}
+                  min={0}
+                  max={100}
+                  step={5}
+                />
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>All liquid</span>
+                  <span>Example: $100 payment → ${(100 * yieldAllocation / 100).toFixed(0)} to Aave, ${(100 * (1 - yieldAllocation / 100)).toFixed(0)} liquid</span>
+                  <span>All invested</span>
                 </div>
-                <div className="border rounded-lg p-4 cursor-pointer hover:border-primary transition-colors bg-card hover:bg-accent/50 relative">
-                  <input type="radio" name="risk" className="absolute inset-0 opacity-0 cursor-pointer" />
-                  <Zap className="h-6 w-6 mb-2 text-orange-500" />
-                  <div className="font-medium">Aggressive</div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="monthly-limit">Monthly Investment Limit (USDC)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="monthly-limit"
+                    type="number"
+                    value={yieldMonthlyLimit}
+                    onChange={e => setYieldMonthlyLimit(e.target.value)}
+                    placeholder="0 = no limit"
+                    min="0"
+                  />
+                  <span className="flex items-center text-sm text-muted-foreground px-2">USDC/mo</span>
                 </div>
+                <p className="text-xs text-muted-foreground">Set to 0 for no monthly cap.</p>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label>Auto-Harvest for Outgoing Payments</Label>
+                  <div className="text-sm text-muted-foreground">
+                    When liquid USDC is insufficient, automatically withdraw from Aave to cover payments
+                  </div>
+                </div>
+                <Switch checked={yieldAutoHarvest} onCheckedChange={setYieldAutoHarvest} />
               </div>
             </div>
 
-            <div className="space-y-4">
-              <div className="flex justify-between">
-                <Label>Asset Allocation (Stable vs Volatile)</Label>
-                <span className="text-sm text-muted-foreground">60/40</span>
-              </div>
-              <Slider defaultValue={[60]} max={100} step={1} />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="spending">Monthly Spending Limit</Label>
-              <div className="flex gap-2">
-                <Input id="spending" type="number" defaultValue="1000" />
-                <Select defaultValue="usdc">
-                  <SelectTrigger className="w-[100px]">
-                    <SelectValue placeholder="Token" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="eth">ETH</SelectItem>
-                    <SelectItem value="usdc">USDC</SelectItem>
-                    <SelectItem value="dai">DAI</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="flex justify-end">
+              <Button onClick={handleSaveYieldSettings} disabled={yieldLoading} variant={yieldSaved ? 'outline' : 'default'}>
+                {yieldLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : yieldSaved ? <><CheckCircle2 className="h-4 w-4 mr-1 text-green-500" />Saved</> : <><Save className="h-4 w-4 mr-1" />Save Yield Settings</>}
+              </Button>
             </div>
           </CardContent>
         </Card>

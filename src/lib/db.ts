@@ -15,6 +15,17 @@ export interface AgentWallet {
     ensName?: string
     erc8004TokenId?: string
     agentName?: string
+    // Tax configuration
+    taxEnabled?: boolean
+    taxRate?: number          // percentage, e.g. 7.5
+    taxLabel?: string         // 'VAT' | 'GST' | 'Sales Tax' | 'Custom'
+    // Yield configuration
+    yieldEnabled?: boolean
+    yieldAllocationPercent?: number  // % of each crypto payment to deposit into Aave
+    yieldMonthlyLimit?: number       // max USDC invested per month
+    yieldMonthlyInvested?: number    // tracks spend this month
+    yieldAutoHarvest?: boolean       // auto-withdraw from Aave for outgoing if needed
+    yieldLastResetMonth?: string     // YYYY-MM for monthly limit tracking
 }
 
 export interface Payment {
@@ -407,6 +418,19 @@ export async function getOrderFulfillments(orderId: string): Promise<PaymentFulf
     )
 
     return fulfillments.filter((f): f is PaymentFulfillment => f !== null)
+}
+
+/**
+ * Looks up the merchant's AgentWallet from a PaymentOrder ID.
+ * Used by the auto-invest flow to find the agent after receiving a payment.
+ */
+export async function getAgentByOrderId(orderId: string): Promise<AgentWallet | null> {
+    const redis = await getRedisClient()
+    const orderData = await redis.get(`order:${orderId}`)
+    if (!orderData) return null
+    const order = JSON.parse(orderData) as PaymentOrder
+    if (!order.userId) return null
+    return getAgentByUserId(order.userId)
 }
 
 // ENS + Agent Identity Operations

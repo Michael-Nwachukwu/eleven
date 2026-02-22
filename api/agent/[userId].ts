@@ -127,9 +127,90 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
         }
 
+        // ── Update Tax Settings (POST) ────────────────────────────────────
+        if (req.method === 'POST' && action === 'update-tax') {
+            const { taxEnabled, taxRate, taxLabel } = req.body
+            const { updateAgentMetadata } = await import('../../src/lib/db')
+            const agent = await getAgentByUserId(userId as string)
+            if (!agent) return res.status(404).json({ error: 'Agent not found' })
+            try {
+                await updateAgentMetadata(userId as string, { taxEnabled, taxRate, taxLabel } as any)
+                return res.status(200).json({ success: true })
+            } catch (err: any) {
+                return res.status(500).json({ error: 'Failed to save tax settings', details: err.message })
+            }
+        }
+
+        // ── Update Yield Settings (POST) ──────────────────────────────────
+        if (req.method === 'POST' && action === 'update-yield-settings') {
+            const { yieldEnabled, yieldAllocationPercent, yieldMonthlyLimit, yieldAutoHarvest } = req.body
+            const { updateAgentMetadata } = await import('../../src/lib/db')
+            const agent = await getAgentByUserId(userId as string)
+            if (!agent) return res.status(404).json({ error: 'Agent not found' })
+            try {
+                await updateAgentMetadata(userId as string, {
+                    yieldEnabled,
+                    yieldAllocationPercent,
+                    yieldMonthlyLimit,
+                    yieldAutoHarvest,
+                } as any)
+                return res.status(200).json({ success: true })
+            } catch (err: any) {
+                return res.status(500).json({ error: 'Failed to save yield settings', details: err.message })
+            }
+        }
+
+        // ── Get Yield Position (GET) ──────────────────────────────────────
+        if (req.method === 'GET' && action === 'yield-position') {
+            const agent = await getAgentByUserId(userId as string)
+            if (!agent) return res.status(404).json({ error: 'Agent not found' })
+            try {
+                const { getAavePosition } = await import('../../src/services/aave-service')
+                const position = await getAavePosition(agent.agentAddress)
+                return res.status(200).json(position)
+            } catch (err: any) {
+                return res.status(500).json({ error: 'Failed to fetch yield position', details: err.message })
+            }
+        }
+
+        // ── Yield Deposit (POST) ──────────────────────────────────────────
+        if (req.method === 'POST' && action === 'yield-deposit') {
+            const { amount } = req.body
+            if (!amount || isNaN(parseFloat(amount))) return res.status(400).json({ error: 'amount is required' })
+            const agent = await getAgentByUserId(userId as string)
+            if (!agent) return res.status(404).json({ error: 'Agent not found' })
+            try {
+                const { getDecryptedPrivateKey } = await import('../../src/lib/db')
+                const { supplyToAave } = await import('../../src/services/aave-service')
+                const privateKey = await getDecryptedPrivateKey(userId as string)
+                if (!privateKey) return res.status(400).json({ error: 'No agent private key' })
+                const txHash = await supplyToAave(parseFloat(amount), privateKey)
+                return res.status(200).json({ success: true, txHash })
+            } catch (err: any) {
+                return res.status(500).json({ error: 'Yield deposit failed', details: err.message })
+            }
+        }
+
+        // ── Yield Withdraw (POST) ─────────────────────────────────────────
+        if (req.method === 'POST' && action === 'yield-withdraw') {
+            const { amount } = req.body  // can be 'all' or a number
+            const agent = await getAgentByUserId(userId as string)
+            if (!agent) return res.status(404).json({ error: 'Agent not found' })
+            try {
+                const { getDecryptedPrivateKey } = await import('../../src/lib/db')
+                const { withdrawFromAave } = await import('../../src/services/aave-service')
+                const privateKey = await getDecryptedPrivateKey(userId as string)
+                if (!privateKey) return res.status(400).json({ error: 'No agent private key' })
+                const amountNum = amount === 'all' ? Infinity : parseFloat(amount)
+                const txHash = await withdrawFromAave(amountNum, privateKey)
+                return res.status(200).json({ success: true, txHash })
+            } catch (err: any) {
+                return res.status(500).json({ error: 'Yield withdraw failed', details: err.message })
+            }
+        }
+
         // ── Default: return agent info ────────────────────────────────────
         if (req.method !== 'GET') {
-            // If it's a POST/PUT without a handled action, fail
             return res.status(400).json({ error: 'Invalid action for this method' })
         }
 
@@ -139,7 +220,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(404).json({ error: 'Agent not found' })
         }
 
-        // Return agent info (without private key)
         return res.status(200).json({
             id: agent.id,
             adminAddress: agent.adminAddress,
@@ -148,7 +228,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             isActive: agent.isActive,
             ensName: agent.ensName,
             agentName: agent.agentName,
-            erc8004TokenId: agent.erc8004TokenId
+            erc8004TokenId: agent.erc8004TokenId,
+            // Tax
+            taxEnabled: agent.taxEnabled ?? false,
+            taxRate: agent.taxRate ?? 0,
+            taxLabel: agent.taxLabel ?? 'VAT',
+            // Yield
+            yieldEnabled: agent.yieldEnabled ?? false,
+            yieldAllocationPercent: agent.yieldAllocationPercent ?? 0,
+            yieldMonthlyLimit: agent.yieldMonthlyLimit ?? 0,
+            yieldAutoHarvest: agent.yieldAutoHarvest ?? false,
         })
 
     } catch (error: any) {

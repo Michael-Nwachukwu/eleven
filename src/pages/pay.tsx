@@ -400,6 +400,23 @@ export default function PayPage() {
                         {/* Crypto Details */}
                         {isCryptoPayment && (
                             <div className="space-y-2 text-sm">
+                                {/* Tax breakdown */}
+                                {paymentRequest.metadata?.taxRate && (
+                                    <>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-muted-foreground">Subtotal</span>
+                                            <span className="font-mono font-medium">{paymentRequest.metadata.subtotal} {paymentRequest.metadata.token || 'USDC'}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-muted-foreground">{paymentRequest.metadata.taxLabel || 'Tax'} ({paymentRequest.metadata.taxRate}%)</span>
+                                            <span className="font-mono font-medium text-amber-600">+{paymentRequest.metadata.taxAmount} {paymentRequest.metadata.token || 'USDC'}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center border-t pt-1">
+                                            <span className="font-medium">Total</span>
+                                            <span className="font-mono font-bold">{paymentRequest.maxAmountRequired} {paymentRequest.metadata.token || 'USDC'}</span>
+                                        </div>
+                                    </>
+                                )}
                                 <div className="flex justify-between items-center">
                                     <span className="text-muted-foreground">Recipient</span>
                                     {recipientEns ? (

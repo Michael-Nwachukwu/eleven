@@ -489,6 +489,23 @@ export default function PaymentReview() {
 
                 {/* Crypto Payment Details */}
                 <div className="space-y-3">
+                  {/* Tax breakdown */}
+                  {paymentRequest.metadata?.taxRate && (
+                    <>
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-muted-foreground">Subtotal</span>
+                        <span className="font-mono text-sm">{paymentRequest.metadata.subtotal} {paymentRequest.metadata.token || 'USDC'}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-muted-foreground">{paymentRequest.metadata.taxLabel || 'Tax'} ({paymentRequest.metadata.taxRate}%)</span>
+                        <span className="font-mono text-sm text-amber-600">+{paymentRequest.metadata.taxAmount} {paymentRequest.metadata.token || 'USDC'}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b font-semibold">
+                        <span>Total</span>
+                        <span className="font-mono text-sm">{paymentRequest.maxAmountRequired} {paymentRequest.metadata.token || 'USDC'}</span>
+                      </div>
+                    </>
+                  )}
                   <div className="flex justify-between py-2 border-b">
                     <span className="text-muted-foreground flex items-center gap-2">
                       <Wallet className="h-4 w-4" /> Recipient
