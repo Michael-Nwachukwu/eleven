@@ -451,7 +451,7 @@ export default function FundAgent() {
                       ))}
                     </div>
                   </div>
-                  <Button className="w-full" onClick={handleDirectDeposit} disabled={isTransferring || !externalWallet}>
+                  <Button className="w-full" onClick={handleDirectDeposit} disabled={isTransferring}>
                     {isTransferring && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     {externalWallet
                       ? `Send ${fundingAmount} ${fundingToken} from ${externalWallet.walletClientType}`
@@ -673,9 +673,9 @@ export default function FundAgent() {
                     <CardContent className="space-y-3">
                       {executions.map((e, i) => (
                         <div key={i} className={`rounded-lg px-4 py-3 border transition-all ${e.status === 'done' ? 'border-green-200 bg-green-50/50 dark:bg-green-900/10 dark:border-green-800'
-                            : e.status === 'failed' ? 'border-red-200 bg-red-50/50 dark:bg-red-900/10 dark:border-red-800'
-                              : e.status === 'pending' ? 'border-muted'
-                                : 'border-primary/30 bg-primary/5'
+                          : e.status === 'failed' ? 'border-red-200 bg-red-50/50 dark:bg-red-900/10 dark:border-red-800'
+                            : e.status === 'pending' ? 'border-muted'
+                              : 'border-primary/30 bg-primary/5'
                           }`}>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">

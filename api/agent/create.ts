@@ -67,15 +67,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             privateKey
         )
 
+        // Handle optional ENS registration + ERC-8004 Minting
+        const { agentName } = req.body
+        let finalEnsName = undefined
+        let finalErc8004Id = undefined
+
+        if (agentName && typeof agentName === 'string') {
+            const sanitizedName = agentName.toLowerCase().replace(/[^a-z0-9-]/g, '')
+            try {
+                const { registerEnsSubdomain } = await import('../../src/services/namestone-service')
+                const { updateAgentMetadata } = await import('../../src/lib/db')
+                const { mintAgentIdentityOffchain } = await import('../../src/services/erc8004-service')
+
+                // 1. Register ENS
+                await registerEnsSubdomain(sanitizedName, agentAddress, {
+                    description: `Eleven Autonomous Agent: ${agentName}`,
+                })
+
+                // 2. Mint ERC-8004 Identity
+                finalErc8004Id = await mintAgentIdentityOffchain(userId, {
+                    agentName,
+                    ensName: sanitizedName,
+                    address: agentAddress
+                })
+
+                // 3. Update DB
+                await updateAgentMetadata(userId, { ensName: sanitizedName, agentName })
+                finalEnsName = sanitizedName
+
+            } catch (err) {
+                console.error("Failed to register ENS or Mint Identity during creation", err)
+                // Continue execution — agent was still created successfully
+            }
+        }
+
         // Return agent info including private key (for client-side signing)
         return res.status(201).json({
             id: agent.id,
             adminAddress: agent.adminAddress,
             agentAddress: agent.agentAddress,
             createdAt: agent.createdAt,
+            ensName: finalEnsName,
+            erc8004TokenId: finalErc8004Id,
             privateKey: privateKey // Return the raw private key once
         })
-
     } catch (error: any) {
         console.error('Error creating agent:', error)
         return res.status(500).json({

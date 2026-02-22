@@ -209,20 +209,35 @@ export default function QrGenerator() {
         }
 
         const tokenAddress = getTokenAddress(token, network)
+
+        // ── Tax calculation ──────────────────────────────────────────────
+        const subtotalNum = parseFloat(amount)
+        const taxRate = (agent?.taxEnabled && agent?.taxRate) ? agent.taxRate : 0
+        const taxAmount = taxRate > 0 ? parseFloat((subtotalNum * (taxRate / 100)).toFixed(6)) : 0
+        const totalAmount = taxRate > 0
+          ? (subtotalNum + taxAmount).toFixed(6)
+          : amount
+
         paymentRequest = {
-          maxAmountRequired: amount,
+          maxAmountRequired: totalAmount,
           resource: `payment-${Date.now()}`,
           payTo: agentAddress as `0x${string}`,
           asset: tokenAddress as `0x${string}`,
           network: 'arbitrum',
-          description: description || `Payment request for ${amount} ${token}`,
+          description: description || `Payment request for ${totalAmount} ${token}`,
           metadata: {
             itemName: description || "Payment Request",
             timestamp: Date.now(),
-            seller: agentAddress,
+            seller: agent?.ensName ? `${agent.ensName}.0xkitchens.eth` : agentAddress,
             token: token,
             mode: 'crypto',
-            oid: newOrderId // Embed Order ID
+            oid: newOrderId,
+            ...(taxRate > 0 && {
+              subtotal: amount,
+              taxRate,
+              taxAmount: taxAmount.toFixed(6),
+              taxLabel: agent?.taxLabel || 'VAT',
+            }),
           }
         }
       } else if (fiatCurrency === 'VND') {

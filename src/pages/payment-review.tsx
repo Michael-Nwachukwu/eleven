@@ -36,6 +36,7 @@ export default function PaymentReview() {
   const [payerName, setPayerName] = useState('')
   const [payerEmail, setPayerEmail] = useState('')
   const [isRecording, setIsRecording] = useState(false)
+  const [recipientEns, setRecipientEns] = useState<string | null>(null)
 
   // External wallet
   const externalWallet = wallets.find(w => w.walletClientType !== 'privy')
@@ -55,6 +56,25 @@ export default function PaymentReview() {
       navigate("/qr-scanner")
     }
   }, [location, navigate])
+
+  // Resolve recipient ENS name dynamically
+  useEffect(() => {
+    if (!paymentRequest?.payTo) return
+    // If metadata already has an ENS name, use that
+    if (paymentRequest.metadata?.seller?.includes('.eth')) {
+      setRecipientEns(paymentRequest.metadata.seller)
+      return
+    }
+    // Otherwise look it up from the backend
+    fetch(`/api/agent/_?action=resolve-address&address=${paymentRequest.payTo}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.ensName) {
+          setRecipientEns(`${data.ensName}.0xkitchens.eth`)
+        }
+      })
+      .catch(() => { /* ignore */ })
+  }, [paymentRequest?.payTo, paymentRequest?.metadata?.seller])
 
   const handleConfirmPayment = async () => {
     if (!paymentRequest) return
@@ -469,11 +489,34 @@ export default function PaymentReview() {
 
                 {/* Crypto Payment Details */}
                 <div className="space-y-3">
+                  {/* Tax breakdown */}
+                  {paymentRequest.metadata?.taxRate && (
+                    <>
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-muted-foreground">Subtotal</span>
+                        <span className="font-mono text-sm">{paymentRequest.metadata.subtotal} {paymentRequest.metadata.token || 'USDC'}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-muted-foreground">{paymentRequest.metadata.taxLabel || 'Tax'} ({paymentRequest.metadata.taxRate}%)</span>
+                        <span className="font-mono text-sm text-amber-600">+{paymentRequest.metadata.taxAmount} {paymentRequest.metadata.token || 'USDC'}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b font-semibold">
+                        <span>Total</span>
+                        <span className="font-mono text-sm">{paymentRequest.maxAmountRequired} {paymentRequest.metadata.token || 'USDC'}</span>
+                      </div>
+                    </>
+                  )}
                   <div className="flex justify-between py-2 border-b">
                     <span className="text-muted-foreground flex items-center gap-2">
                       <Wallet className="h-4 w-4" /> Recipient
                     </span>
-                    <span className="font-mono text-sm">{formatAddress(paymentRequest.payTo)}</span>
+                    {recipientEns ? (
+                      <span className="font-medium text-primary bg-primary/10 px-2 py-1 rounded text-sm">
+                        {recipientEns}
+                      </span>
+                    ) : (
+                      <span className="font-mono text-sm">{formatAddress(paymentRequest.payTo)}</span>
+                    )}
                   </div>
 
                   {paymentRequest.metadata?.itemName && (

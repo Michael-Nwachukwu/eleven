@@ -2,7 +2,7 @@
 
 import { usePrivy } from "@privy-io/react-auth"
 import { Navigate } from "react-router-dom"
-import { ArrowRight, Bot, Shield, Zap, QrCode, Globe, CreditCard, Mail } from "lucide-react"
+import { ArrowRight, Bot, Shield, Zap, QrCode, Globe, CreditCard, Mail, Fingerprint, TrendingUp, Receipt } from "lucide-react"
 import { Navbar } from "@/components/layout/navbar"
 import { Button } from "@/components/ui/button"
 
@@ -42,7 +42,7 @@ export default function LandingPage() {
 
             <p className="text-xl md:text-2xl text-muted-foreground max-w-3xl mx-auto leading-relaxed">
               Accept payments from humans and AI agents via one QR code.
-              Instant, self-custodial settlement on Arbitrum.
+              Verifiable ENS identity, configurable tax collection, and autonomous yield on every payment.
             </p>
 
             <div className="pt-10 flex flex-col sm:flex-row gap-4 justify-center items-center">
@@ -114,22 +114,33 @@ export default function LandingPage() {
               {/* Feature 5 */}
               <div className="bg-background/80 backdrop-blur-sm p-8 rounded-2xl border border-border/50 shadow-sm hover:shadow-md hover:border-amber-500/50 transition-all group">
                 <div className="h-14 w-14 rounded-2xl bg-amber-500/10 flex items-center justify-center mb-6 group-hover:bg-amber-500/20 group-hover:scale-110 transition-all">
-                  <Mail className="h-7 w-7 text-amber-500" />
+                  <Receipt className="h-7 w-7 text-amber-500" />
                 </div>
-                <h3 className="text-xl font-bold mb-3">Automated Receipts</h3>
+                <h3 className="text-xl font-bold mb-3">Tax Collection</h3>
                 <p className="text-muted-foreground leading-relaxed">
-                  Beautiful, transactional HTML emails sent to payers automatically via Resend upon successful payment.
+                  Set a VAT, GST, or custom tax rate. Every QR payment auto-calculates the tax-inclusive total and shows customers a full Subtotal → Tax → Total breakdown.
                 </p>
               </div>
 
               {/* Feature 6 */}
               <div className="bg-background/80 backdrop-blur-sm p-8 rounded-2xl border border-border/50 shadow-sm hover:shadow-md hover:border-rose-500/50 transition-all group">
                 <div className="h-14 w-14 rounded-2xl bg-rose-500/10 flex items-center justify-center mb-6 group-hover:bg-rose-500/20 group-hover:scale-110 transition-all">
-                  <Shield className="h-7 w-7 text-rose-500" />
+                  <Fingerprint className="h-7 w-7 text-rose-500" />
                 </div>
-                <h3 className="text-xl font-bold mb-3">Zero Custody</h3>
+                <h3 className="text-xl font-bold mb-3">Agent Identity & ENS</h3>
                 <p className="text-muted-foreground leading-relaxed">
-                  You maintain full control of your keys and funds. Secured by Privy authentication and robust decentralized smart contracts.
+                  Give your agent a verifiable ERC-8004 identity and a human-readable ENS subdomain like <code className="text-xs bg-muted px-1 py-0.5 rounded">mystore.0xkitchens.eth</code>. Discoverable by other agents and humans.
+                </p>
+              </div>
+
+              {/* Feature 7 */}
+              <div className="bg-background/80 backdrop-blur-sm p-8 rounded-2xl border border-border/50 shadow-sm hover:shadow-md hover:border-teal-500/50 transition-all group col-span-1 md:col-span-2 lg:col-span-1">
+                <div className="h-14 w-14 rounded-2xl bg-teal-500/10 flex items-center justify-center mb-6 group-hover:bg-teal-500/20 group-hover:scale-110 transition-all">
+                  <TrendingUp className="h-7 w-7 text-teal-500" />
+                </div>
+                <h3 className="text-xl font-bold mb-3">Autonomous Yield</h3>
+                <p className="text-muted-foreground leading-relaxed">
+                  Set an allocation % once — your agent automatically deposits that slice of every incoming crypto payment into Aave V3 (~1.8% APY). Fully hands-free, with auto-harvest when funds are needed.
                 </p>
               </div>
             </div>
@@ -152,10 +163,10 @@ export default function LandingPage() {
               <div className="hidden md:block absolute top-12 left-[12%] right-[12%] h-[2px] bg-border z-0" />
 
               {[
-                { step: "01", title: "Create Agent", desc: "Sign in with Privy to provision your on-chain agent wallet." },
-                { step: "02", title: "Generate QR", desc: "Create a signed x402 payment link for crypto or fiat." },
-                { step: "03", title: "Customer Pays", desc: "Users scan and pay via USDC, ETH, or local Bank Transfer." },
-                { step: "04", title: "Instant Settlement", desc: "Funds land directly in your agent wallet on Arbitrum." }
+                { step: "01", title: "Create Agent", desc: "Sign in with Privy, claim your ENS subdomain, and configure your tax rate and yield allocation." },
+                { step: "02", title: "Generate QR", desc: "Create a signed x402 payment link. Tax is auto-applied; your ENS name is embedded as your identity." },
+                { step: "03", title: "Customer Pays", desc: "Users scan and pay — they see your ENS identity and a clear Subtotal → Tax → Total breakdown." },
+                { step: "04", title: "Earn While You Sleep", desc: "Funds land in your agent wallet. Your configured % is instantly invested in Aave V3 — autonomously." }
               ].map((item, i) => (
                 <div key={i} className="relative z-10 flex flex-col items-center text-center space-y-5 px-2">
                   <div className="w-24 h-24 rounded-full bg-background border-4 border-muted flex items-center justify-center shadow-lg group hover:border-primary/50 transition-all">

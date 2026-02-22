@@ -12,6 +12,20 @@ export interface AgentWallet {
     updatedAt: string
     isActive: boolean
     notificationEmail?: string
+    ensName?: string
+    erc8004TokenId?: string
+    agentName?: string
+    // Tax configuration
+    taxEnabled?: boolean
+    taxRate?: number          // percentage, e.g. 7.5
+    taxLabel?: string         // 'VAT' | 'GST' | 'Sales Tax' | 'Custom'
+    // Yield configuration
+    yieldEnabled?: boolean
+    yieldAllocationPercent?: number  // % of each crypto payment to deposit into Aave
+    yieldMonthlyLimit?: number       // max USDC invested per month
+    yieldMonthlyInvested?: number    // tracks spend this month
+    yieldAutoHarvest?: boolean       // auto-withdraw from Aave for outgoing if needed
+    yieldLastResetMonth?: string     // YYYY-MM for monthly limit tracking
 }
 
 export interface Payment {
@@ -404,4 +418,69 @@ export async function getOrderFulfillments(orderId: string): Promise<PaymentFulf
     )
 
     return fulfillments.filter((f): f is PaymentFulfillment => f !== null)
+}
+
+/**
+ * Looks up the merchant's AgentWallet from a PaymentOrder ID.
+ * Used by the auto-invest flow to find the agent after receiving a payment.
+ */
+export async function getAgentByOrderId(orderId: string): Promise<AgentWallet | null> {
+    const redis = await getRedisClient()
+    const orderData = await redis.get(`order:${orderId}`)
+    if (!orderData) return null
+    const order = JSON.parse(orderData) as PaymentOrder
+    if (!order.userId) return null
+    return getAgentByUserId(order.userId)
+}
+
+// ENS + Agent Identity Operations
+export async function updateAgentMetadata(
+    userId: string,
+    fields: { ensName?: string; erc8004TokenId?: string; agentName?: string }
+): Promise<void> {
+    const redis = await getRedisClient()
+    // Two-step lookup: same pattern as getAgentByUserId
+    const agentId = await redis.get(`agent:user:${userId}`)
+    if (!agentId) throw new Error('Agent not found')
+
+    const agentData = await redis.get(`agent:${agentId}`)
+    if (!agentData) throw new Error('Agent not found')
+
+    const agent = JSON.parse(agentData) as AgentWallet
+
+    // If updating ENS name, maintain index
+    if (fields.ensName && fields.ensName !== agent.ensName) {
+        if (agent.ensName) {
+            await redis.sRem('ens_names', agent.ensName.toLowerCase())
+            await redis.del(`ens_to_userId:${agent.ensName.toLowerCase()}`)
+        }
+        await redis.sAdd('ens_names', fields.ensName.toLowerCase())
+        await redis.set(`ens_to_userId:${fields.ensName.toLowerCase()}`, userId)
+    }
+
+    const updated = { ...agent, ...fields, updatedAt: new Date().toISOString() }
+    await redis.set(`agent:${agentId}`, JSON.stringify(updated))
+}
+
+export async function isEnsNameTaken(ensName: string): Promise<boolean> {
+    const redis = await getRedisClient()
+    const isMember = await redis.sIsMember('ens_names', ensName.toLowerCase())
+    return !!isMember
+}
+
+export async function getAgentByEnsName(ensName: string): Promise<AgentWallet | null> {
+    const redis = await getRedisClient()
+    const userId = await redis.get(`ens_to_userId:${ensName.toLowerCase()}`)
+    if (!userId) return null
+    return getAgentByUserId(userId)
+}
+
+export async function getEnsNameByAddress(address: string): Promise<string | null> {
+    const redis = await getRedisClient()
+    const agentId = await redis.get(`agent:address:${address}`)
+    if (!agentId) return null
+    const agentData = await redis.get(`agent:${agentId}`)
+    if (!agentData) return null
+    const agent = JSON.parse(agentData) as AgentWallet
+    return agent.ensName || null
 }

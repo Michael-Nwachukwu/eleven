@@ -3,17 +3,57 @@
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Loader2, CheckCircle2, Wallet, ArrowRight } from "lucide-react"
 import { useState, useEffect } from "react"
+import { usePrivy } from "@privy-io/react-auth"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { useAgentWallet } from "@/hooks/useAgentWallet"
 
 export default function CreateAgent() {
   const navigate = useNavigate()
+  const { user } = usePrivy()
   const { agent, loading, createAgent } = useAgentWallet()
   const [isCreating, setIsCreating] = useState(false)
   const [agentAddress, setAgentAddress] = useState<string>("")
+  const [agentName, setAgentName] = useState("")
+  const [nameAvailable, setNameAvailable] = useState<boolean | null>(null)
+  const [checkingName, setCheckingName] = useState(false)
+
+  // Debounce check for ENS name availability
+  useEffect(() => {
+    if (!agentName) {
+      setNameAvailable(null)
+      return
+    }
+    const sanitized = agentName.toLowerCase().replace(/[^a-z0-9-]/g, '')
+    if (sanitized !== agentName) {
+      setAgentName(sanitized)
+    }
+
+    // Ignore short names
+    if (sanitized.length < 3) {
+      setNameAvailable(null)
+      return
+    }
+
+    setCheckingName(true)
+    const timeout = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/agent/${user?.id}?action=check-ens&name=${sanitized}`)
+        const data = await res.json()
+        setNameAvailable(data.available)
+      } catch {
+        setNameAvailable(null)
+      } finally {
+        setCheckingName(false)
+      }
+    }, 500)
+
+    return () => clearTimeout(timeout)
+  }, [agentName, user?.id])
 
   // Check if agent already exists and redirect
   useEffect(() => {
@@ -28,7 +68,7 @@ export default function CreateAgent() {
     setIsCreating(true)
 
     try {
-      const newAgent = await createAgent()
+      const newAgent = await createAgent(agentName || undefined)
       setAgentAddress(newAgent.agentAddress)
       toast.success("Agent wallet created successfully!")
 
@@ -204,6 +244,32 @@ export default function CreateAgent() {
               </div>
             </div>
 
+            {/* ENS Name Input */}
+            <div className="space-y-3 pt-2">
+              <Label htmlFor="agentName">Agent ENS Name (Optional)</Label>
+              <div className="flex gap-2 items-center">
+                <Input
+                  id="agentName"
+                  placeholder="e.g. mystore"
+                  value={agentName}
+                  onChange={(e) => setAgentName(e.target.value)}
+                  className={`flex-1 ${nameAvailable === false ? 'border-red-500' : ''}`}
+                  maxLength={20}
+                  disabled={isCreating}
+                />
+                <div className="text-muted-foreground bg-muted px-3 py-2 rounded-md text-sm whitespace-nowrap">
+                  .0xkitchens.eth
+                </div>
+              </div>
+
+              <div className="text-xs h-4">
+                {checkingName && <span className="text-muted-foreground flex items-center"><Loader2 className="h-3 w-3 animate-spin mr-1" /> Checking availability...</span>}
+                {!checkingName && nameAvailable === true && <span className="text-green-500 text-sm">Name is available!</span>}
+                {!checkingName && nameAvailable === false && <span className="text-red-500 text-sm">Name is already taken.</span>}
+                {!checkingName && agentName.length > 0 && agentName.length < 3 && <span className="text-muted-foreground">Name must be at least 3 characters.</span>}
+              </div>
+            </div>
+
             {/* Info Banner */}
             <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
               <div className="flex gap-3">
@@ -219,7 +285,7 @@ export default function CreateAgent() {
               </div>
             </div>
 
-            <Button onClick={handleCreateAgent} disabled={isCreating} size="lg" className="w-full">
+            <Button onClick={handleCreateAgent} disabled={isCreating || nameAvailable === false || (agentName.length > 0 && agentName.length < 3)} size="lg" className="w-full">
               {isCreating ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

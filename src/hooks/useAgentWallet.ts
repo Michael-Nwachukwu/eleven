@@ -8,6 +8,18 @@ export interface AgentWallet {
     agentAddress: string
     createdAt: string
     isActive: boolean
+    ensName?: string
+    agentName?: string
+    erc8004TokenId?: string
+    // Tax
+    taxEnabled?: boolean
+    taxRate?: number
+    taxLabel?: string
+    // Yield
+    yieldEnabled?: boolean
+    yieldAllocationPercent?: number
+    yieldMonthlyLimit?: number
+    yieldAutoHarvest?: boolean
 }
 
 // Force API usage (Vercel KV) even in dev mode to ensure consistency
@@ -57,7 +69,7 @@ export function useAgentWallet() {
         loadAgent()
     }, [user?.id])
 
-    const createAgent = async () => {
+    const createAgent = async (agentName?: string) => {
         if (!user?.id) {
             throw new Error('User not authenticated')
         }
@@ -93,7 +105,7 @@ export function useAgentWallet() {
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ userId: user.id }),
+                    body: JSON.stringify({ userId: user.id, agentName }),
                 })
 
                 if (!response.ok) {
